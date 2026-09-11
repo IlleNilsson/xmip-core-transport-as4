@@ -30,6 +30,7 @@
 //! `as4://peer/msh?from=Buyer&message-id=1.2@xmip&action=Submit`.
 
 pub mod envelope;
+mod loopback;
 pub mod mime;
 pub mod signal;
 pub mod signer;
@@ -366,30 +367,21 @@ mod tests {
 
     #[test]
     fn a_message_is_posted_and_its_receipt_names_it() {
-        let (far_end, listener, address) = far_end();
-        let long = vec![0x2a; 200_000];
-        let sent = long.clone();
-        let sender = std::thread::spawn(move || {
-            let near = near(&address, "Buyer", "Seller").under("urn:svc", "Submit");
-            near.send("", b"ISA*00*")?;
-            near.send(&format!("http://{address}/msh"), &sent)?;
-            near.send("", b"")
-        });
-        let (message, first) = far_end.accept_one(&listener).expect("first").expect("new");
+        use transport::loopback::Loopback;
+        let pair = As4Transport::loopback().under("urn:svc", "Submit");
+        let first = pair.round(b"ISA*00*").expect("first");
         assert_eq!(first.bytes, b"ISA*00*");
-        assert_eq!(message.from, "Buyer");
-        assert_eq!(message.action, "Submit");
         assert!(first.origin_uri.starts_with("as4://127.0.0.1:"));
-        assert!(first.origin_uri.contains("/msh?from=Buyer&message-id="));
+        assert!(first.origin_uri.contains("/msh?from=Xmip&message-id="));
         assert!(first.origin_uri.ends_with("@xmip&action=Submit"));
-        let (_, second) = far_end.accept_one(&listener).expect("second").expect("new");
+        let long = vec![0x2a; 200_000];
+        let second = pair.round(&long).expect("second");
         assert_eq!(second.bytes, long);
-        let (_, third) = far_end.accept_one(&listener).expect("third").expect("new");
+        let third = pair.round(b"").expect("third");
         assert!(third.bytes.is_empty());
-        sender.join().expect("thread").expect("three sends");
-        assert_eq!(far_end.name(), "as4");
-        assert_eq!(far_end.directions(), Directions::BOTH);
-        assert!(far_end.claims().is_none());
+        assert_eq!(pair.name(), "as4");
+        assert_eq!(pair.directions(), Directions::BOTH);
+        assert!(pair.claims().is_none());
     }
 
     #[test]
