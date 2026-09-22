@@ -11,8 +11,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use codec::xml::{escape, unescape};
 use transport::error::{Result, protocol_error};
-use transport::xml::{escape, unescape};
 
 /// The ebMS 3.0 core namespace.
 pub const EBMS: &str = "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/";
@@ -159,6 +159,7 @@ impl UserMessage {
         let required = |name: &str| {
             element(user, name)
                 .map(unescape)
+                .transpose()?
                 .filter(|text| !text.is_empty())
                 .ok_or_else(|| protocol_error(format!("a UserMessage with no {name}")))
         };
@@ -166,29 +167,39 @@ impl UserMessage {
             element(user, side)
                 .and_then(|party| element(party, "PartyId"))
                 .map(unescape)
+                .transpose()?
                 .ok_or_else(|| protocol_error(format!("a UserMessage with no {side} party")))
         };
-        let href = attribute(user, "PartInfo", "href")
+        let href = attribute(user, "PartInfo", "href")?
             .ok_or_else(|| protocol_error("a UserMessage with no payload reference"))?;
         Ok(Self {
             message_id: required("MessageId")?,
-            timestamp: element(user, "Timestamp").map(unescape).unwrap_or_default(),
+            timestamp: element(user, "Timestamp")
+                .map(unescape)
+                .transpose()?
+                .unwrap_or_default(),
             from: party("From")?,
             to: party("To")?,
             service: required("Service")?,
             action: required("Action")?,
             conversation_id: element(user, "ConversationId")
                 .map(unescape)
+                .transpose()?
                 .unwrap_or_default(),
-            payload_cid: unescape(href.trim_start_matches("cid:")),
-            party_type: element(user, "From").and_then(|from| attribute(from, "PartyId", "type")),
-            service_type: attribute(user, "Service", "type"),
-            agreement: element(user, "AgreementRef").map(unescape),
+            payload_cid: unescape(href.trim_start_matches("cid:"))?,
+            party_type: match element(user, "From") {
+                Some(from) => attribute(from, "PartyId", "type")?,
+                None => None,
+            },
+            service_type: attribute(user, "Service", "type")?,
+            agreement: element(user, "AgreementRef").map(unescape).transpose()?,
             properties: element(user, "MessageProperties")
                 .map(properties)
+                .transpose()?
                 .unwrap_or_default(),
             payload_properties: element(user, "PartInfo")
                 .map(properties)
+                .transpose()?
                 .unwrap_or_default(),
         })
     }
@@ -218,8 +229,11 @@ fn property_elements(properties: &[(String, String)]) -> String {
 
 /// Every `Property` element in `xml`, its `name` attribute and its text,
 /// in order; one that is empty (`<x/>`) or unnamed is passed over.
-#[must_use]
-pub fn properties(xml: &str) -> Vec<(String, String)> {
+///
+/// # Errors
+///
+/// A name or text holds an entity XML does not define.
+pub fn properties(xml: &str) -> Result<Vec<(String, String)>> {
     let mut found = Vec::new();
     let mut rest = xml;
     while let Some(start) = rest.find('<') {
@@ -232,15 +246,15 @@ pub fn properties(xml: &str) -> Vec<(String, String)> {
         if local_name(open) != "Property" || open.ends_with('/') {
             continue;
         }
-        let Some(name) = value_of(open, "name") else {
+        let Some(name) = value_of(open, "name")? else {
             continue;
         };
         let Some(close) = rest.find("</") else {
             break;
         };
-        found.push((name, unescape(&rest[..close])));
+        found.push((name, unescape(&rest[..close])?));
     }
-    found
+    Ok(found)
 }
 
 /// The local name of the element `open` opens, whatever its prefix.
@@ -252,11 +266,16 @@ fn local_name(open: &str) -> &str {
 }
 
 /// The value of `attribute` in the open tag `open`, unescaped.
-fn value_of(open: &str, attribute: &str) -> Option<String> {
+fn value_of(open: &str, attribute: &str) -> Result<Option<String>> {
     let key = format!("{attribute}=\"");
-    let at = open.find(&key)? + key.len();
+    let Some(at) = open.find(&key).map(|at| at + key.len()) else {
+        return Ok(None);
+    };
     let value = &open[at..];
-    Some(unescape(&value[..value.find('"')?]))
+    let Some(end) = value.find('"') else {
+        return Ok(None);
+    };
+    Ok(Some(unescape(&value[..end])?))
 }
 
 /// `messaging` as the header of a SOAP 1.2 envelope with an empty body.
@@ -296,19 +315,24 @@ pub fn element<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
 
 /// The value of `attribute` on the first element whose local name is
 /// `name`.
-#[must_use]
-pub fn attribute(xml: &str, name: &str, attribute: &str) -> Option<String> {
+///
+/// # Errors
+///
+/// The value holds an entity XML does not define.
+pub fn attribute(xml: &str, name: &str, attribute: &str) -> Result<Option<String>> {
     let mut rest = xml;
     while let Some(start) = rest.find('<') {
         let tag = &rest[start + 1..];
-        let end = tag.find('>')?;
+        let Some(end) = tag.find('>') else {
+            return Ok(None);
+        };
         let open = &tag[..end];
         if local_name(open) == name {
             return value_of(open, attribute);
         }
         rest = &tag[end..];
     }
-    None
+    Ok(None)
 }
 
 /// A message id no other message from this process carries.
@@ -396,10 +420,12 @@ mod tests {
         assert_eq!(element("<Xy>1</Xy>", "X"), None);
         assert_eq!(element("<X>never closed", "X"), None);
         assert_eq!(
-            attribute("<a:P href=\"cid:q\"/>", "P", "href").as_deref(),
+            attribute("<a:P href=\"cid:q\"/>", "P", "href")
+                .expect("read")
+                .as_deref(),
             Some("cid:q")
         );
-        assert_eq!(attribute("<P/>", "P", "href"), None);
+        assert_eq!(attribute("<P/>", "P", "href").expect("read"), None);
     }
 
     #[test]
@@ -429,7 +455,8 @@ mod tests {
         assert_eq!(again.conversation_id, again.message_id);
         assert_eq!(again.properties, message.properties);
         assert_eq!(
-            properties("<p:Property name=\"a\">1</p:Property><Property/><Property name=\"b\"/>"),
+            properties("<p:Property name=\"a\">1</p:Property><Property/><Property name=\"b\"/>")
+                .expect("read"),
             vec![("a".to_string(), "1".to_string())]
         );
     }

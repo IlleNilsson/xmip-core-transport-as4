@@ -23,6 +23,8 @@ path = "src/lib.rs"
 # WS-Security signer the manifest names, xmip-core-authenticate-certificate,
 # plugs in through the Signer trait.
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# XML character data, escaped as every reader in the estate unescapes it.
+codec = { package = "xmip-core-codec", git = "https://github.com/IlleNilsson/xmip-core-codec", branch = "main" }
 http = { package = "xmip-core-transport-http", git = "https://github.com/IlleNilsson/xmip-core-transport-http", branch = "main" }
 
 [lints.rust]
