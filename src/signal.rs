@@ -8,8 +8,8 @@
 //! carries instead is the Signer's to add. An Error carries the ebMS code
 //! and a description the sender can read in a log.
 
+use codec::xml::{escape, unescape};
 use transport::error::{Result, protocol_error};
-use transport::xml::{escape, unescape};
 
 use crate::envelope::{UserMessage, attribute, element, next_id, timestamp, wrap};
 
@@ -67,22 +67,26 @@ impl Signal {
     pub fn from_envelope(envelope: &str) -> Result<Self> {
         let signal = element(envelope, "SignalMessage")
             .ok_or_else(|| protocol_error("an answer with no SignalMessage in it"))?;
-        let ref_to = element(signal, "RefToMessageId").map(unescape);
+        let ref_to = element(signal, "RefToMessageId")
+            .map(unescape)
+            .transpose()?;
         if element(signal, "Receipt").is_some() {
             return Ok(Self::Receipt {
                 ref_to: ref_to.ok_or_else(|| protocol_error("a Receipt naming no message"))?,
                 message_id: element(signal, "MessageId")
                     .map(unescape)
+                    .transpose()?
                     .unwrap_or_default(),
             });
         }
-        let code = attribute(signal, "Error", "errorCode")
+        let code = attribute(signal, "Error", "errorCode")?
             .ok_or_else(|| protocol_error("a SignalMessage that is neither Receipt nor Error"))?;
         Ok(Self::Error {
             ref_to,
             code,
             description: element(signal, "Description")
                 .map(unescape)
+                .transpose()?
                 .unwrap_or_default(),
         })
     }
