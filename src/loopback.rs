@@ -8,9 +8,10 @@ use std::net::TcpListener;
 use std::sync::Mutex;
 
 use http::target::HttpTarget;
+use transport::Transport;
 use transport::error::{Result, protocol_error};
+use transport::listening::Listening;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{Arrived, Transport};
 
 use crate::{As4Transport, Unsigned, as_http};
 
@@ -40,35 +41,22 @@ impl As4Transport {
     }
 }
 
-/// A bound MSH waiting for its one User Message, which it receipts.
-struct Listening {
-    transport: As4Transport,
-    listener: TcpListener,
-    address: String,
-}
-
-impl FarEnd for Listening {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
-    fn take_one(self: Box<Self>) -> Result<Arrived> {
-        self.transport
-            .accept_one(&self.listener)?
-            .map(|(_, arrived)| arrived)
-            .ok_or_else(|| protocol_error("a message seen before: receipted, not delivered"))
-    }
-}
-
 impl Loopback for As4Transport {
+    /// A bound MSH waiting for its one User Message, which it receipts.
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         let transport = self.twin(self.endpoint.clone());
-        let (listener, address) = transport.bind()?;
-        Ok(Box::new(Listening {
-            transport,
-            listener,
-            address,
-        }))
+        let bound = transport.bind()?;
+        Ok(Box::new(Listening::new(
+            move |listener: &TcpListener| {
+                transport
+                    .accept_one(listener)?
+                    .map(|(_, arrived)| arrived)
+                    .ok_or_else(|| {
+                        protocol_error("a message seen before: receipted, not delivered")
+                    })
+            },
+            bound,
+        )))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
