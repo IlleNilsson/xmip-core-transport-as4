@@ -11,6 +11,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use codec::civil::CivilTime;
 use codec::xml::{escape, unescape};
 use transport::error::{Result, protocol_error};
 
@@ -63,7 +64,7 @@ impl UserMessage {
         Self {
             conversation_id: message_id.clone(),
             message_id,
-            timestamp: timestamp(),
+            timestamp: CivilTime::now().rfc3339(),
             from: from.to_string(),
             to: to.to_string(),
             service: service.to_string(),
@@ -89,7 +90,7 @@ impl UserMessage {
         Self {
             conversation_id: message_id.clone(),
             message_id,
-            timestamp: timestamp(),
+            timestamp: CivilTime::now().rfc3339(),
             ..self.clone()
         }
     }
@@ -342,30 +343,6 @@ pub(crate) fn next_id() -> String {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
     format!("{nanos}.{}@xmip", COUNTER.fetch_add(1, Ordering::Relaxed))
-}
-
-/// Now as `xs:dateTime` in UTC, seconds whole: `2026-09-10T12:00:00Z`.
-pub(crate) fn timestamp() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs());
-    let (days, rest) = (seconds / 86_400, seconds % 86_400);
-    // Days since 1970-01-01 to a civil date, Howard Hinnant's algorithm.
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + u64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rest / 3_600,
-        rest % 3_600 / 60,
-        rest % 60
-    )
 }
 
 #[cfg(test)]
