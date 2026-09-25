@@ -40,8 +40,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 pub use envelope::UserMessage;
-use http::message::{Request, Response, exchange, read_request, write_response};
-use http::target::HttpTarget;
+use net::Endpoint;
+use net::http::{Request, Response, exchange, read_request, write_response};
 pub use signal::Signal;
 pub use signer::{Signer, Unsigned};
 use transport::error::{Result, TransportError, protocol_error};
@@ -136,7 +136,7 @@ impl As4Transport {
     /// # Errors
     /// Where the address is taken, malformed, or not permitted.
     pub fn bind(&self) -> Result<(TcpListener, String)> {
-        socket::bind_tcp(HttpTarget::parse(&self.endpoint)?.authority)
+        socket::bind_tcp(&Endpoint::parse(&self.endpoint)?.address())
     }
 
     /// Accept one message on an already-bound listener and answer its
@@ -264,7 +264,7 @@ impl As4Transport {
                 Signal::from_envelope(&envelope)
             });
         if !(200..300).contains(&response.status) {
-            let retryable = response.status >= 500 || matches!(response.status, 408 | 429);
+            let retryable = http::status::retryable(response.status);
             let why = match signal {
                 Ok(Signal::Error {
                     code, description, ..
@@ -299,8 +299,11 @@ fn soap(status: u16, envelope: &str) -> Response {
         .body(&body)
 }
 
-/// `as4://` is `http://` on the wire, and `as4s://` is `https://`.
-fn as_http(url: &str) -> String {
+/// `as4://` is `http://` on the wire, and `as4s://` is `https://`; any
+/// other URL as it is. Public for the profiles that ride on AS4 and name
+/// an access point in its scheme: Peppol.
+#[must_use]
+pub fn as_http(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("as4://") {
         format!("http://{rest}")
     } else if let Some(rest) = url.strip_prefix("as4s://") {
@@ -330,16 +333,16 @@ impl Transport for As4Transport {
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
         let url = self.resolve(target);
-        let parsed = HttpTarget::parse(&url)?;
+        let endpoint = Endpoint::parse(&url)?;
         let message = self.template.fresh();
         let attachments = vec![(message.payload_cid.clone(), bytes.to_vec())];
         let envelope = self.signer.sign(message.envelope(), &attachments)?;
         let (content_type, body) = mime::pack(&envelope, &attachments);
-        let request = Request::new("POST", parsed.path)
-            .header("Host", parsed.authority)
+        let request = Request::new("POST", endpoint.path())
+            .header("Host", &endpoint.authority())
             .header("Content-Type", &content_type)
             .body(&body);
-        let connection = http::endpoint::connect(&url, self.timeout)?;
+        let connection = http::endpoint::connect(&endpoint, self.timeout)?;
         let response = exchange(connection, &request)?;
         self.verify_receipt(&response, &message)
     }
@@ -398,8 +401,8 @@ mod tests {
                     .header("Host", &address)
                     .header("Content-Type", &content_type)
                     .body(&body);
-                let connection =
-                    http::endpoint::connect(&format!("http://{address}"), Some(secs(2)))?;
+                let at = Endpoint::parse(&format!("http://{address}"))?;
+                let connection = http::endpoint::connect(&at, Some(secs(2)))?;
                 let response = exchange(connection, &request)?;
                 near.verify_receipt(&response, near.template())?;
             }
