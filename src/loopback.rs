@@ -7,7 +7,7 @@
 use std::net::TcpListener;
 use std::sync::Mutex;
 
-use http::target::HttpTarget;
+use net::Endpoint;
 use transport::Transport;
 use transport::error::{Result, protocol_error};
 use transport::listening::Listening;
@@ -60,7 +60,8 @@ impl Loopback for As4Transport {
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
-        let path = HttpTarget::parse(&self.endpoint)?.path;
+        let endpoint = Endpoint::parse(&self.endpoint)?;
+        let path = endpoint.path();
         self.twin(as_http(&format!("as4://{address}{path}")))
             .send("", payload)
     }
