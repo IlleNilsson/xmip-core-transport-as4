@@ -41,8 +41,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 pub use envelope::UserMessage;
+use http::endpoint::{Connections, Offer};
 use net::Endpoint;
-use net::http::{Request, Response, exchange, read_request, write_response};
+use net::http::{Request, Response, read_request, write_response};
 pub use signal::Signal;
 pub use signer::{Signer, Unsigned};
 use transport::error::{Result, TransportError, protocol_error};
@@ -66,6 +67,8 @@ pub struct As4Transport {
     check: Option<Check>,
     timeout: Option<Duration>,
     seen: Mutex<Vec<String>>,
+    /// The connections kept to partners' endpoints.
+    connections: Connections,
 }
 
 impl As4Transport {
@@ -82,6 +85,7 @@ impl As4Transport {
             check: None,
             timeout: None,
             seen: Mutex::new(Vec::new()),
+            connections: Connections::new(),
         }
     }
 
@@ -343,8 +347,10 @@ impl Transport for As4Transport {
             .header("Host", &endpoint.authority())
             .header("Content-Type", &content_type)
             .body(&body);
-        let connection = http::endpoint::connect(&endpoint, self.timeout)?;
-        let response = exchange(connection, &request)?;
+        let offer = Offer::Http11;
+        let response = self
+            .connections
+            .exchange(&endpoint, self.timeout, offer, &request)?;
         self.verify_receipt(&response, &message)
     }
 }
@@ -352,6 +358,7 @@ impl Transport for As4Transport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use net::http::exchange;
     use std::io::{Read, Write};
 
     fn secs(n: u64) -> Duration {
