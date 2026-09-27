@@ -23,6 +23,9 @@ path = "src/lib.rs"
 # WS-Security signer the manifest names, xmip-core-authenticate-certificate,
 # plugs in through the Signer trait.
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# The settings this technology declares (xcore::settings), read through
+# transport::Configured (ADR-0064, amendment 2026-09-26).
+xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 # XML character data, escaped as every reader in the estate unescapes it.
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 http = { package = "xmip-core-transport-http", git = "https://github.com/IlleNilsson/xmip-core-transport-http", branch = "main" }
@@ -45,3 +48,6 @@ expect_used = "allow"
 # HTTPS, through http's: this technology maps its scheme to https and could
 # not reach a TLS stack until 2026-09-23.
 tls = ["http/tls"]
+
+[profile.dev.package."*"]
+opt-level = 3

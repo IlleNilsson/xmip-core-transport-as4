@@ -32,6 +32,7 @@
 pub mod envelope;
 mod loopback;
 pub mod mime;
+mod settings;
 pub mod signal;
 pub mod signer;
 
