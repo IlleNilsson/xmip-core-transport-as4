@@ -8,11 +8,9 @@
 //! prefix — `eb:`, `eb3:`, `ns2:` — does not matter; what matters is the
 //! element. The estate reads a protocol's flat XML that way (ADR-0044).
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use codec::civil::CivilTime;
 use codec::xml::{escape, unescape};
+use codec::{hex, random};
 use transport::error::{Result, protocol_error};
 
 /// The ebMS 3.0 core namespace.
@@ -336,13 +334,9 @@ pub fn attribute(xml: &str, name: &str, attribute: &str) -> Result<Option<String
     Ok(None)
 }
 
-/// A message id no other message from this process carries.
+/// A message id no other message carries: 128 random bits in hex, `@xmip`.
 pub(crate) fn next_id() -> String {
-    static COUNTER: AtomicU64 = AtomicU64::new(1);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_nanos());
-    format!("{nanos}.{}@xmip", COUNTER.fetch_add(1, Ordering::Relaxed))
+    format!("{}@xmip", hex::encode(&random::array::<16>()))
 }
 
 #[cfg(test)]
