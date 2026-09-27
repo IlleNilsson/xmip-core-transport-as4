@@ -38,6 +38,7 @@ impl As4Transport {
             timeout: self.timeout,
             seen: Mutex::new(Vec::new()),
             connections: self.connections.clone(),
+            inbound: crate::Inbound::new(),
         }
     }
 }

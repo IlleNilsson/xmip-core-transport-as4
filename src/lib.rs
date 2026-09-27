@@ -36,14 +36,16 @@ mod settings;
 pub mod signal;
 pub mod signer;
 
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
 use std::sync::Mutex;
 use std::time::Duration;
 
 pub use envelope::UserMessage;
 use http::endpoint::{Connections, Offer};
+use http::inbound::Inbound;
+use http::server;
 use net::Endpoint;
-use net::http::{Request, Response, read_request, write_response};
+use net::http::{Request, Response};
 pub use signal::Signal;
 pub use signer::{Signer, Unsigned};
 use transport::error::{Result, TransportError, protocol_error};
@@ -53,6 +55,10 @@ use transport::{Arrived, Directions, Transport};
 /// What a message must satisfy beyond being addressed to this party — a
 /// profile's own rules — checked before the Receipt is written.
 pub type Check = Box<dyn Fn(&UserMessage) -> Result<()> + Send + Sync>;
+
+/// What one message taken off a partner's POST came to: the message and its
+/// Stream, or `None` where it was one seen before.
+pub type Received = Result<Option<(UserMessage, Arrived)>>;
 
 /// How many message ids are remembered for reception awareness before the
 /// oldest is forgotten.
@@ -69,6 +75,8 @@ pub struct As4Transport {
     seen: Mutex<Vec<String>>,
     /// The connections kept to partners' endpoints.
     connections: Connections,
+    /// The listener a Receive Location keeps, and partners' connections.
+    inbound: Inbound,
 }
 
 impl As4Transport {
@@ -86,6 +94,7 @@ impl As4Transport {
             timeout: None,
             seen: Mutex::new(Vec::new()),
             connections: Connections::new(),
+            inbound: Inbound::new(),
         }
     }
 
@@ -153,11 +162,39 @@ impl As4Transport {
     /// message is refused — each answered with the Error that says so
     /// before the error is returned.
     pub fn accept_one(&self, listener: &TcpListener) -> Result<Option<(UserMessage, Arrived)>> {
-        let (stream, peer) = socket::accept_tcp(listener, self.timeout)?;
-        let (mut reader, mut writer) = socket::split(stream)?;
-        let request = read_request(&mut reader)?
-            .ok_or_else(|| protocol_error("a partner that connected and sent nothing"))?;
-        let (ref_to, code, taken) = match self.unpack(&request) {
+        server::serve_one_from(listener, self.timeout, |request, peer| {
+            self.answer(request, peer)
+        })?
+    }
+
+    /// The next message from whichever partner posts first, on the listener
+    /// the first call bound and kept, answered as [`Self::accept_one`]
+    /// answers: what a Receive Location, and Peppol's access point, take.
+    ///
+    /// # Errors
+    /// As [`Self::accept_one`], and where nothing arrived in time.
+    pub fn take_next(&self) -> Received {
+        self.inbound.next(
+            || self.bind(),
+            self.timeout,
+            |request, peer| self.answer(request, peer),
+        )?
+    }
+
+    /// Bind the listener [`Self::take_next`] keeps now, where no receive
+    /// has, and say where it is.
+    ///
+    /// # Errors
+    /// Where the address is taken, malformed, or not permitted.
+    pub fn listening(&self) -> Result<&str> {
+        self.inbound.bound(|| self.bind())
+    }
+
+    /// What one POST from `peer` earns: the message it carries and its
+    /// Receipt — `None` where it was seen before, receipted again and not
+    /// delivered again — or the Error, with the status that says why.
+    fn answer(&self, request: &Request, peer: SocketAddr) -> (Received, Response) {
+        let (ref_to, code, taken) = match self.unpack(request) {
             Err(error) => (None, signal::VALUE_NOT_RECOGNIZED, Err(error)),
             Ok((message, bytes)) => {
                 let id = Some(message.message_id.clone());
@@ -169,16 +206,20 @@ impl As4Transport {
         };
         match taken {
             Ok((message, bytes)) => {
-                let receipt = self.signer.sign(Signal::receipt(&message), &[])?;
-                write_response(&mut writer, &soap(200, &receipt))?;
+                let receipt = match self.signer.sign(Signal::receipt(&message), &[]) {
+                    Ok(receipt) => receipt,
+                    // This side could not sign; the partner sends again.
+                    Err(error) => return (Err(error), Response::new(500)),
+                };
+                let answer = soap(200, &receipt);
                 if self.remember(&message.message_id) {
-                    return Ok(None);
+                    return (Ok(None), answer);
                 }
                 let origin = format!(
                     "as4://{peer}{}?from={}&message-id={}&action={}",
                     request.path, message.from, message.message_id, message.action
                 );
-                Ok(Some((message, Arrived::new(origin, bytes))))
+                (Ok(Some((message, Arrived::new(origin, bytes)))), answer)
             }
             Err(error) => {
                 let (status, code) = if error.retryable {
@@ -187,8 +228,7 @@ impl As4Transport {
                     (400, code)
                 };
                 let fault = Signal::error(ref_to.as_deref(), code, &error.message);
-                write_response(&mut writer, &soap(status, &fault))?;
-                Err(error)
+                (Err(error), soap(status, &fault))
             }
         }
     }
@@ -327,10 +367,12 @@ impl Transport for As4Transport {
         Directions::BOTH
     }
 
+    /// The next message from whichever partner posts first, on the listener
+    /// the first receive bound and the connections partners keep; nothing
+    /// where it was seen before.
     fn receive(&self) -> Result<Vec<Arrived>> {
-        let (listener, _) = self.bind()?;
         Ok(self
-            .accept_one(&listener)?
+            .take_next()?
             .map(|(_, arrived)| arrived)
             .into_iter()
             .collect())
@@ -358,7 +400,7 @@ impl Transport for As4Transport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use net::http::exchange;
+    use net::http::{exchange, read_request, write_response};
     use std::io::{Read, Write};
 
     fn secs(n: u64) -> Duration {
@@ -374,6 +416,28 @@ mod tests {
 
     fn near(address: &str, me: &str, partner: &str) -> As4Transport {
         As4Transport::new(format!("as4://{address}/msh"), me, partner).timing_out_after(secs(2))
+    }
+
+    #[test]
+    fn every_receive_takes_from_one_kept_listener_and_one_kept_connection() {
+        let (seller, _, _) = far_end();
+        let address = seller.listening().expect("bound").to_string();
+        let buyer = std::thread::spawn(move || {
+            let buyer = near(&address, "Buyer", "Seller");
+            for round in 0..5u8 {
+                buyer.send("", &[round]).expect("sent");
+            }
+            buyer.connections.opened()
+        });
+        for round in 0..5u8 {
+            assert_eq!(seller.receive().expect("received")[0].bytes, [round]);
+        }
+        assert_eq!(
+            buyer.join().expect("buyer"),
+            1,
+            "one connection for every send"
+        );
+        assert_eq!(seller.inbound.open(), 1);
     }
 
     #[test]
