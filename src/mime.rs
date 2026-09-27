@@ -48,11 +48,12 @@ pub fn pack(envelope: &str, attachments: &[(String, Vec<u8>)]) -> (String, Vec<u
 ///
 /// # Errors
 /// Where the body is neither an envelope nor a multipart, a part has no
-/// end, or no part is the envelope.
+/// end, no part is the envelope, or the envelope is not UTF-8 text. The
+/// attachments are bytes and come back as they arrived.
 pub fn unpack(content_type: &str, body: &[u8]) -> Result<(String, Attachments)> {
     let Some(boundary) = mime::parameter(content_type, "boundary") else {
         if is_envelope(content_type) {
-            return Ok((String::from_utf8_lossy(body).into_owned(), Vec::new()));
+            return Ok((envelope_text(body)?, Vec::new()));
         }
         return Err(protocol_error(format!(
             "a body that is neither SOAP nor multipart/related: {content_type}"
@@ -65,7 +66,7 @@ pub fn unpack(content_type: &str, body: &[u8]) -> Result<(String, Attachments)> 
     for part in parts {
         let kind = part.content_type().unwrap_or_default();
         if envelope.is_none() && is_envelope(kind) {
-            envelope = Some(String::from_utf8_lossy(&part.body).into_owned());
+            envelope = Some(envelope_text(&part.body)?);
         } else {
             let cid = part.content_id().unwrap_or_default().to_string();
             attachments.push((cid, part.body));
@@ -74,6 +75,17 @@ pub fn unpack(content_type: &str, body: &[u8]) -> Result<(String, Attachments)> 
     let envelope =
         envelope.ok_or_else(|| protocol_error("a multipart with no SOAP envelope in it"))?;
     Ok((envelope, attachments))
+}
+
+/// The envelope's bytes as the UTF-8 text SOAP writes it in, or refused:
+/// never read lossily.
+fn envelope_text(bytes: &[u8]) -> Result<String> {
+    String::from_utf8(bytes.to_vec()).map_err(|refused| {
+        protocol_error(format!(
+            "a SOAP envelope that is not UTF-8 text: {}",
+            refused.utf8_error()
+        ))
+    })
 }
 
 /// One part: its type, written `binary`, and its content id.
@@ -132,5 +144,21 @@ mod tests {
         assert!(unpack("text/plain", b"hello").is_err());
         assert!(unpack(kind, b"--b1\r\nContent-Type: text/xml\r\n\r\n<E/>").is_err());
         assert!(unpack(kind, b"--b1\r\nContent-ID: <p>\r\n\r\nx\r\n--b1--\r\n").is_err());
+    }
+
+    #[test]
+    fn an_envelope_that_is_not_utf_8_is_refused_and_an_attachment_kept_whole() {
+        let refused = unpack(SOAP_TYPE, b"<E>\xff</E>").expect_err("not UTF-8");
+        assert!(refused.message.contains("not UTF-8"), "{refused}");
+        let bytes = vec![0xff, 0xfe, 0x00];
+        let (content_type, body) = pack("<E/>", &[("p@xmip".to_string(), bytes.clone())]);
+        let (_, back) = unpack(&content_type, &body).expect("unpacked");
+        assert_eq!(back, vec![("p@xmip".to_string(), bytes)]);
+        let theirs = b"--b1\r\nContent-Type: text/xml\r\n\r\n<E>\xfe</E>\r\n--b1--\r\n";
+        let kind = "multipart/related; boundary=b1";
+        assert!(
+            unpack(kind, theirs).is_err(),
+            "a multipart's envelope as well"
+        );
     }
 }
