@@ -14,9 +14,9 @@ use codec::mime::{self, Part};
 use transport::error::{Result, protocol_error};
 
 /// The media type of the envelope part.
-pub const SOAP_TYPE: &str = "application/soap+xml";
+const SOAP_TYPE: &str = "application/soap+xml";
 /// The content id the envelope part carries.
-pub const ROOT_CID: &str = "envelope@xmip";
+const ROOT_CID: &str = "envelope@xmip";
 
 /// The media types a partner may write the envelope part in.
 const ENVELOPE_TYPES: [&str; 3] = [SOAP_TYPE, "text/xml", "application/xml"];

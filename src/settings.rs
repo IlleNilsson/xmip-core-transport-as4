@@ -96,7 +96,11 @@ mod tests {
         ];
         let sent =
             As4Transport::open("as4://partner:8080/msh", Applies::Send, &given).expect("built");
-        assert_eq!(sent.endpoint, "http://partner:8080/msh");
+        let endpoint = net::Endpoint::parse_under(&sent.endpoint, &crate::SCHEMES).expect("read");
+        assert_eq!(
+            (endpoint.secure(), endpoint.address()),
+            (false, "partner:8080".into())
+        );
         let template = sent.template();
         assert_eq!(
             (template.from.as_str(), template.to.as_str()),

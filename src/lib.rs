@@ -44,8 +44,8 @@ pub use envelope::UserMessage;
 use http::endpoint::{Connections, Offer};
 use http::inbound::Inbound;
 use http::server;
-use net::Endpoint;
 use net::http::{Request, Response};
+use net::{Endpoint, Schemes};
 pub use signal::Signal;
 pub use signer::{Signer, Unsigned};
 use transport::error::{Result, TransportError, protocol_error};
@@ -87,7 +87,7 @@ impl As4Transport {
     #[must_use]
     pub fn new(endpoint: impl Into<String>, me: &str, partner: &str) -> Self {
         Self {
-            endpoint: as_http(&endpoint.into()),
+            endpoint: endpoint.into(),
             template: UserMessage::new(me, partner, envelope::TEST_SERVICE, envelope::TEST_ACTION),
             signer: Box::new(Unsigned),
             check: None,
@@ -150,7 +150,7 @@ impl As4Transport {
     /// # Errors
     /// Where the address is taken, malformed, or not permitted.
     pub fn bind(&self) -> Result<(TcpListener, String)> {
-        socket::bind_tcp(&Endpoint::parse(&self.endpoint)?.address())
+        socket::bind_tcp(&Endpoint::parse_under(&self.endpoint, &SCHEMES)?.address())
     }
 
     /// Accept one message on an already-bound listener and answer its
@@ -292,11 +292,11 @@ impl As4Transport {
 
     /// Where a target names the partner's endpoint itself, or is empty and
     /// means the one configured.
-    fn resolve(&self, target: &str) -> String {
+    fn resolve<'a>(&'a self, target: &'a str) -> &'a str {
         if target.is_empty() {
-            self.endpoint.clone()
+            &self.endpoint
         } else {
-            as_http(target)
+            target
         }
     }
 
@@ -344,19 +344,13 @@ fn soap(status: u16, envelope: &str) -> Response {
         .body(&body)
 }
 
-/// `as4://` is `http://` on the wire, and `as4s://` is `https://`; any
-/// other URL as it is. Public for the profiles that ride on AS4 and name
-/// an access point in its scheme: Peppol.
-#[must_use]
-pub fn as_http(url: &str) -> String {
-    if let Some(rest) = url.strip_prefix("as4://") {
-        format!("http://{rest}")
-    } else if let Some(rest) = url.strip_prefix("as4s://") {
-        format!("https://{rest}")
-    } else {
-        url.to_string()
-    }
-}
+/// The schemes a partner's endpoint is written in: `as4://` is `http://`
+/// on the wire, and `as4s://` is `https://`. Public for the profiles that
+/// ride on AS4 and name an access point in its scheme: Peppol.
+pub const SCHEMES: Schemes = Schemes {
+    plain: &["http", "as4"],
+    secure: &["https", "as4s"],
+};
 
 impl Transport for As4Transport {
     fn name(&self) -> &'static str {
@@ -379,8 +373,7 @@ impl Transport for As4Transport {
     }
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        let url = self.resolve(target);
-        let endpoint = Endpoint::parse(&url)?;
+        let endpoint = Endpoint::parse_under(self.resolve(target), &SCHEMES)?;
         let message = self.template.fresh();
         let attachments = vec![(message.payload_cid.clone(), bytes.to_vec())];
         let envelope = self.signer.sign(message.envelope(), &attachments)?;
