@@ -6,6 +6,8 @@ Requests go on connections kept between them (`http::endpoint::Connections`, off
 
 A Receive Location keeps its listener, bound on the first receive, and the connections senders keep open on it (`http::inbound::Inbound`): each receive takes the next request from whichever sends first, where until 2026-09-27 each receive bound a listener of its own, answered one request with `Connection: close`, and refused a request that came between two receives. `As4Transport::take_next` is that receive with the message it carried, which Peppol's access point takes through, and `listening` binds the listener before the first receive and says where. The peer an origin names comes from `http::server` (`serve_one_from`, and the `Inbound`), where AS4 accepted and read its own connection until then.
 
+The partner's endpoint is kept as written and read by `net::Endpoint` in [xmip-core-library-net](https://github.com/IlleNilsson/xmip-core-library-net) under the schemes this technology declares, `as4::SCHEMES` — `as4://` is `http://`, `as4s://` is `https://` — which Peppol reads its access point under too. Until 2026-09-28 an `as_http` function rewrote the URL before it was read.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

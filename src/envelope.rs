@@ -4,12 +4,12 @@
 //! referenced by content id and carried as a MIME attachment beside it
 //! (ebMS 3.0 Core section 5.2, AS4 profile section 2).
 //!
-//! Written by hand and read by scanning for local names, so a partner's
-//! prefix — `eb:`, `eb3:`, `ns2:` — does not matter; what matters is the
-//! element. The estate reads a protocol's flat XML that way (ADR-0044).
+//! Written by hand and read with the estate's flat scan (`codec::xml`), by
+//! local name, so a partner's prefix — `eb:`, `eb3:`, `ns2:` — does not
+//! matter; what matters is the element (ADR-0044).
 
 use codec::civil::CivilTime;
-use codec::xml::{escape, unescape};
+use codec::xml::{self, escape};
 use codec::{hex, random};
 use transport::error::{Result, protocol_error};
 
@@ -153,50 +153,42 @@ impl UserMessage {
     /// Where the envelope has no `UserMessage`, or one without its message
     /// id, parties or payload reference.
     pub fn from_envelope(envelope: &str) -> Result<Self> {
-        let user = element(envelope, "UserMessage")
+        let user = xml::content(envelope, "UserMessage")
             .ok_or_else(|| protocol_error("an envelope with no UserMessage in it"))?;
         let required = |name: &str| {
-            element(user, name)
-                .map(unescape)
-                .transpose()?
+            xml::text(user, name)?
                 .filter(|text| !text.is_empty())
                 .ok_or_else(|| protocol_error(format!("a UserMessage with no {name}")))
         };
         let party = |side: &str| {
-            element(user, side)
-                .and_then(|party| element(party, "PartyId"))
-                .map(unescape)
+            xml::content(user, side)
+                .map(|party| xml::text(party, "PartyId"))
                 .transpose()?
+                .flatten()
                 .ok_or_else(|| protocol_error(format!("a UserMessage with no {side} party")))
         };
-        let href = attribute(user, "PartInfo", "href")?
+        let href = xml::attribute(user, "PartInfo", "href")?
             .ok_or_else(|| protocol_error("a UserMessage with no payload reference"))?;
         Ok(Self {
             message_id: required("MessageId")?,
-            timestamp: element(user, "Timestamp")
-                .map(unescape)
-                .transpose()?
-                .unwrap_or_default(),
+            timestamp: xml::text(user, "Timestamp")?.unwrap_or_default(),
             from: party("From")?,
             to: party("To")?,
             service: required("Service")?,
             action: required("Action")?,
-            conversation_id: element(user, "ConversationId")
-                .map(unescape)
-                .transpose()?
-                .unwrap_or_default(),
-            payload_cid: unescape(href.trim_start_matches("cid:"))?,
-            party_type: match element(user, "From") {
-                Some(from) => attribute(from, "PartyId", "type")?,
+            conversation_id: xml::text(user, "ConversationId")?.unwrap_or_default(),
+            payload_cid: href.trim_start_matches("cid:").to_string(),
+            party_type: match xml::content(user, "From") {
+                Some(from) => xml::attribute(from, "PartyId", "type")?,
                 None => None,
             },
-            service_type: attribute(user, "Service", "type")?,
-            agreement: element(user, "AgreementRef").map(unescape).transpose()?,
-            properties: element(user, "MessageProperties")
+            service_type: xml::attribute(user, "Service", "type")?,
+            agreement: xml::text(user, "AgreementRef")?,
+            properties: xml::content(user, "MessageProperties")
                 .map(properties)
                 .transpose()?
                 .unwrap_or_default(),
-            payload_properties: element(user, "PartInfo")
+            payload_properties: xml::content(user, "PartInfo")
                 .map(properties)
                 .transpose()?
                 .unwrap_or_default(),
@@ -226,55 +218,24 @@ fn property_elements(properties: &[(String, String)]) -> String {
         })
 }
 
-/// Every `Property` element in `xml`, its `name` attribute and its text,
-/// in order; one that is empty (`<x/>`) or unnamed is passed over.
+/// Every `Property` element in `within`, its `name` attribute and its
+/// text, in order; one that closed itself (`<x/>`) or is unnamed is passed
+/// over.
 ///
 /// # Errors
 ///
 /// A name or text holds an entity XML does not define.
-pub fn properties(xml: &str) -> Result<Vec<(String, String)>> {
+fn properties(within: &str) -> Result<Vec<(String, String)>> {
     let mut found = Vec::new();
-    let mut rest = xml;
-    while let Some(start) = rest.find('<') {
-        let tag = &rest[start + 1..];
-        let Some(end) = tag.find('>') else {
-            break;
-        };
-        let open = &tag[..end];
-        rest = &tag[end + 1..];
-        if local_name(open) != "Property" || open.ends_with('/') {
+    for property in xml::elements(within, "Property") {
+        if property.closed_itself() {
             continue;
         }
-        let Some(name) = value_of(open, "name")? else {
-            continue;
-        };
-        let Some(close) = rest.find("</") else {
-            break;
-        };
-        found.push((name, unescape(&rest[..close])?));
+        if let Some(name) = property.attribute("name")? {
+            found.push((name, property.text()?));
+        }
     }
     Ok(found)
-}
-
-/// The local name of the element `open` opens, whatever its prefix.
-fn local_name(open: &str) -> &str {
-    open.split([' ', '/'])
-        .next()
-        .and_then(|qualified| qualified.rsplit(':').next())
-        .unwrap_or("")
-}
-
-/// The value of `attribute` in the open tag `open`, unescaped.
-fn value_of(open: &str, attribute: &str) -> Result<Option<String>> {
-    let key = format!("{attribute}=\"");
-    let Some(at) = open.find(&key).map(|at| at + key.len()) else {
-        return Ok(None);
-    };
-    let value = &open[at..];
-    let Some(end) = value.find('"') else {
-        return Ok(None);
-    };
-    Ok(Some(unescape(&value[..end])?))
 }
 
 /// `messaging` as the header of a SOAP 1.2 envelope with an empty body.
@@ -286,52 +247,6 @@ pub fn wrap(messaging: &str) -> String {
          <eb:Messaging S12:mustUnderstand=\"true\">{messaging}</eb:Messaging>\
          </S12:Header><S12:Body/></S12:Envelope>"
     )
-}
-
-/// The content of the first element whose local name is `name`, whatever
-/// its prefix, or `None` where there is none or it is empty (`<x/>`).
-#[must_use]
-pub fn element<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
-    let mut rest = xml;
-    while let Some(start) = rest.find('<') {
-        let tag = &rest[start + 1..];
-        let end = tag.find(['>', ' ', '/']).unwrap_or(tag.len());
-        let local = tag[..end].rsplit(':').next().unwrap_or("");
-        if local == name && !tag.starts_with('/') {
-            let close = tag.find('>')?;
-            if tag[..close].ends_with('/') {
-                return None;
-            }
-            let content = &tag[close + 1..];
-            let closing = content.find(&format!("{name}>"))?;
-            let cut = content[..closing].rfind("</")?;
-            return Some(&content[..cut]);
-        }
-        rest = &tag[end..];
-    }
-    None
-}
-
-/// The value of `attribute` on the first element whose local name is
-/// `name`.
-///
-/// # Errors
-///
-/// The value holds an entity XML does not define.
-pub fn attribute(xml: &str, name: &str, attribute: &str) -> Result<Option<String>> {
-    let mut rest = xml;
-    while let Some(start) = rest.find('<') {
-        let tag = &rest[start + 1..];
-        let Some(end) = tag.find('>') else {
-            return Ok(None);
-        };
-        let open = &tag[..end];
-        if local_name(open) == name {
-            return value_of(open, attribute);
-        }
-        rest = &tag[end..];
-    }
-    Ok(None)
 }
 
 /// A message id no other message carries: 128 random bits in hex, `@xmip`.
@@ -381,22 +296,6 @@ mod tests {
         assert!(UserMessage::from_envelope("<eb:UserMessage/>").is_err());
         let no_href = theirs.replace(" href=\"cid:p1\"", "");
         assert!(UserMessage::from_envelope(&no_href).is_err());
-    }
-
-    #[test]
-    fn an_element_is_found_by_local_name_and_an_empty_one_is_none() {
-        assert_eq!(element("<a:X>1</a:X><Y>2</Y>", "X"), Some("1"));
-        assert_eq!(element("<a:X>1</a:X><Y>2</Y>", "Y"), Some("2"));
-        assert_eq!(element("<X/><X>late</X>", "X"), None);
-        assert_eq!(element("<Xy>1</Xy>", "X"), None);
-        assert_eq!(element("<X>never closed", "X"), None);
-        assert_eq!(
-            attribute("<a:P href=\"cid:q\"/>", "P", "href")
-                .expect("read")
-                .as_deref(),
-            Some("cid:q")
-        );
-        assert_eq!(attribute("<P/>", "P", "href").expect("read"), None);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use transport::error::{Result, protocol_error};
 use transport::listening::Listening;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 
-use crate::{As4Transport, Unsigned, as_http};
+use crate::{As4Transport, Unsigned};
 
 /// The party both ends of a loopback are.
 const PARTY: &str = "Xmip";
@@ -62,9 +62,9 @@ impl Loopback for As4Transport {
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
-        let endpoint = Endpoint::parse(&self.endpoint)?;
+        let endpoint = Endpoint::parse_under(&self.endpoint, &crate::SCHEMES)?;
         let path = endpoint.path();
-        self.twin(as_http(&format!("as4://{address}{path}")))
+        self.twin(format!("as4://{address}{path}"))
             .send("", payload)
     }
 }

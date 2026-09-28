@@ -9,10 +9,10 @@
 //! and a description the sender can read in a log.
 
 use codec::civil::CivilTime;
-use codec::xml::{escape, unescape};
+use codec::xml::{self, escape};
 use transport::error::{Result, protocol_error};
 
-use crate::envelope::{UserMessage, attribute, element, next_id, wrap};
+use crate::envelope::{UserMessage, next_id, wrap};
 
 /// A body the receiver could not read as AS4.
 pub const VALUE_NOT_RECOGNIZED: &str = "EBMS:0001";
@@ -66,29 +66,21 @@ impl Signal {
     /// Where the envelope has no `SignalMessage`, or one that is neither a
     /// Receipt naming a message nor an Error with a code.
     pub fn from_envelope(envelope: &str) -> Result<Self> {
-        let signal = element(envelope, "SignalMessage")
+        let signal = xml::content(envelope, "SignalMessage")
             .ok_or_else(|| protocol_error("an answer with no SignalMessage in it"))?;
-        let ref_to = element(signal, "RefToMessageId")
-            .map(unescape)
-            .transpose()?;
-        if element(signal, "Receipt").is_some() {
+        let ref_to = xml::text(signal, "RefToMessageId")?;
+        if xml::content(signal, "Receipt").is_some() {
             return Ok(Self::Receipt {
                 ref_to: ref_to.ok_or_else(|| protocol_error("a Receipt naming no message"))?,
-                message_id: element(signal, "MessageId")
-                    .map(unescape)
-                    .transpose()?
-                    .unwrap_or_default(),
+                message_id: xml::text(signal, "MessageId")?.unwrap_or_default(),
             });
         }
-        let code = attribute(signal, "Error", "errorCode")?
+        let code = xml::attribute(signal, "Error", "errorCode")?
             .ok_or_else(|| protocol_error("a SignalMessage that is neither Receipt nor Error"))?;
         Ok(Self::Error {
             ref_to,
             code,
-            description: element(signal, "Description")
-                .map(unescape)
-                .transpose()?
-                .unwrap_or_default(),
+            description: xml::text(signal, "Description")?.unwrap_or_default(),
         })
     }
 }
