@@ -18,7 +18,7 @@ const SOAP_TYPE: &str = "application/soap+xml";
 /// The content id the envelope part carries.
 const ROOT_CID: &str = "envelope@xmip";
 
-/// The media types a partner may write the envelope part in.
+/// The media types a Party may write the envelope part in.
 const ENVELOPE_TYPES: [&str; 3] = [SOAP_TYPE, "text/xml", "application/xml"];
 
 /// The parts beside the envelope: each a content id and its bytes.
@@ -133,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn a_partner_body_is_read_as_it_was_written_and_a_hollow_one_refused() {
+    fn a_party_body_is_read_as_it_was_written_and_a_hollow_one_refused() {
         let theirs = b"--b1\r\nContent-Type: text/xml\r\n\r\n<E/>\r\n\
             --b1\r\nContent-ID: <p1>\r\nContent-Type: application/octet-stream\r\n\r\nUNA\r\n\
             --b1--\r\n";

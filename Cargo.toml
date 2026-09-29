@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-core-transport-as4"
-description = "AS4 transport: the OASIS ebMS 3.0 AS4 profile over HTTP — one User Message is one Stream, its parties and collaboration beside it, answered with a Receipt signal; a Receive Location answers partners, a Send Location posts to one. A xmip-core-transport technology."
+description = "AS4 transport: the OASIS ebMS 3.0 AS4 profile over HTTP — one User Message is one Stream, its parties and collaboration beside it, answered with a Receipt signal; a Receive Location answers Parties, a Send Location posts to one. A xmip-core-transport technology."
 publish = false
 
 [lib]

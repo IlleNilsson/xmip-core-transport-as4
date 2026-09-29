@@ -9,8 +9,8 @@
 //! the parties, the service, the action and the payload, and the payload
 //! as an attachment beside it by content id. The far end answers on the
 //! same connection with a Signal Message: a Receipt naming the message it
-//! took — the proof a partner keeps — or an Error saying why not. A Receive
-//! Location answers partners; a Send Location posts to one and refuses the
+//! took — the proof a Party keeps — or an Error saying why not. A Receive
+//! Location answers Parties; a Send Location posts to one and refuses the
 //! send where the Receipt is missing, names another message, or is an
 //! Error.
 //!
@@ -20,7 +20,7 @@
 //!
 //! WS-Security signing needs a certificate. The [`Signer`] is what
 //! `xmip-core-authenticate-certificate` supplies, and without one the
-//! exchange is [`Unsigned`] — two Xmip nodes on one wire, or a partner test
+//! exchange is [`Unsigned`] — two Xmip nodes on one wire, or a Party's test
 //! bench. A profile — Peppol is one — shapes the User Message it sends
 //! through [`As4Transport::shaped`] and checks the one it takes through
 //! [`As4Transport::checking`]. The http technology carries the request, the
@@ -56,7 +56,7 @@ use transport::{Arrived, Directions, Transport};
 /// profile's own rules — checked before the Receipt is written.
 pub type Check = Box<dyn Fn(&UserMessage) -> Result<()> + Send + Sync>;
 
-/// What one message taken off a partner's POST came to: the message and its
+/// What one message taken off a Party's POST came to: the message and its
 /// Stream, or `None` where it was one seen before.
 pub type Received = Result<Option<(UserMessage, Arrived)>>;
 
@@ -65,7 +65,7 @@ pub type Received = Result<Option<(UserMessage, Arrived)>>;
 const REMEMBERED: usize = 1024;
 
 pub struct As4Transport {
-    /// The partner's endpoint to send to, or the address to listen at.
+    /// The Party's endpoint to send to, or the address to listen at.
     endpoint: String,
     /// The message every send is a fresh copy of; its `from` is this party.
     template: UserMessage,
@@ -73,22 +73,22 @@ pub struct As4Transport {
     check: Option<Check>,
     timeout: Option<Duration>,
     seen: Mutex<Vec<String>>,
-    /// The connections kept to partners' endpoints.
+    /// The connections kept to Parties' endpoints.
     connections: Connections,
-    /// The listener a Receive Location keeps, and partners' connections.
+    /// The listener a Receive Location keeps, and Parties' connections.
     inbound: Inbound,
 }
 
 impl As4Transport {
-    /// Speak as party `me` to `partner` at `endpoint` —
+    /// Speak as Party `me` to Party `party` at `endpoint` —
     /// `http://host:port/msh` or `as4://host:port/msh` — under the ebMS
     /// test service until [`Self::under`], unsigned until
     /// [`Self::signing_with`].
     #[must_use]
-    pub fn new(endpoint: impl Into<String>, me: &str, partner: &str) -> Self {
+    pub fn new(endpoint: impl Into<String>, me: &str, party: &str) -> Self {
         Self {
             endpoint: endpoint.into(),
-            template: UserMessage::new(me, partner, envelope::TEST_SERVICE, envelope::TEST_ACTION),
+            template: UserMessage::new(me, party, envelope::TEST_SERVICE, envelope::TEST_ACTION),
             signer: Box::new(Unsigned),
             check: None,
             timeout: None,
@@ -131,7 +131,7 @@ impl As4Transport {
         self
     }
 
-    /// Give up on a partner that stops mid-message.
+    /// Give up on a Party that stops mid-message.
     #[must_use]
     pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -144,7 +144,7 @@ impl As4Transport {
         &self.template
     }
 
-    /// Bind at the endpoint's authority as the far end partners post to,
+    /// Bind at the endpoint's authority as the far end Parties post to,
     /// and report the address actually assigned.
     ///
     /// # Errors
@@ -167,7 +167,7 @@ impl As4Transport {
         })?
     }
 
-    /// The next message from whichever partner posts first, on the listener
+    /// The next message from whichever Party posts first, on the listener
     /// the first call bound and kept, answered as [`Self::accept_one`]
     /// answers: what a Receive Location, and Peppol's access point, take.
     ///
@@ -208,7 +208,7 @@ impl As4Transport {
             Ok((message, bytes)) => {
                 let receipt = match self.signer.sign(Signal::receipt(&message), &[]) {
                     Ok(receipt) => receipt,
-                    // This side could not sign; the partner sends again.
+                    // This side could not sign; the Party sends again.
                     Err(error) => return (Err(error), Response::new(500)),
                 };
                 let answer = soap(200, &receipt);
@@ -290,7 +290,7 @@ impl As4Transport {
         false
     }
 
-    /// Where a target names the partner's endpoint itself, or is empty and
+    /// Where a target names the Party's endpoint itself, or is empty and
     /// means the one configured.
     fn resolve<'a>(&'a self, target: &'a str) -> &'a str {
         if target.is_empty() {
@@ -300,7 +300,7 @@ impl As4Transport {
         }
     }
 
-    /// The Signal the partner answered, held against what was sent.
+    /// The Signal the Party answered, held against what was sent.
     fn verify_receipt(&self, response: &Response, sent: &UserMessage) -> Result<()> {
         let content_type = response.header_value("Content-Type").unwrap_or_default();
         let signal =
@@ -317,7 +317,7 @@ impl As4Transport {
                 _ => String::from("no signal in the answer"),
             };
             return Err(TransportError {
-                message: format!("the partner answered {} — {why}", response.status),
+                message: format!("the Party answered {} — {why}", response.status),
                 retryable,
             });
         }
@@ -330,7 +330,7 @@ impl As4Transport {
             Signal::Error {
                 code, description, ..
             } => Err(protocol_error(format!(
-                "the partner refused the message: {code}: {description}"
+                "the Party refused the message: {code}: {description}"
             ))),
         }
     }
@@ -344,7 +344,7 @@ fn soap(status: u16, envelope: &str) -> Response {
         .body(&body)
 }
 
-/// The schemes a partner's endpoint is written in: `as4://` is `http://`
+/// The schemes a Party's endpoint is written in: `as4://` is `http://`
 /// on the wire, and `as4s://` is `https://`. Public for the profiles that
 /// ride on AS4 and name an access point in its scheme: Peppol.
 pub const SCHEMES: Schemes = Schemes {
@@ -361,8 +361,8 @@ impl Transport for As4Transport {
         Directions::BOTH
     }
 
-    /// The next message from whichever partner posts first, on the listener
-    /// the first receive bound and the connections partners keep; nothing
+    /// The next message from whichever Party posts first, on the listener
+    /// the first receive bound and the connections Parties keep; nothing
     /// where it was seen before.
     fn receive(&self) -> Result<Vec<Arrived>> {
         Ok(self
@@ -407,8 +407,8 @@ mod tests {
         (far_end, listener, address)
     }
 
-    fn near(address: &str, me: &str, partner: &str) -> As4Transport {
-        As4Transport::new(format!("as4://{address}/msh"), me, partner).timing_out_after(secs(2))
+    fn near(address: &str, me: &str, party: &str) -> As4Transport {
+        As4Transport::new(format!("as4://{address}/msh"), me, party).timing_out_after(secs(2))
     }
 
     #[test]
@@ -522,7 +522,7 @@ mod tests {
     }
 
     #[test]
-    fn a_receipt_for_another_message_or_a_busy_partner_is_not_a_delivery() {
+    fn a_receipt_for_another_message_or_a_busy_party_is_not_a_delivery() {
         let (_, listener, address) = far_end();
         std::thread::spawn(move || {
             let (stream, _) = socket::accept_tcp(&listener, Some(secs(2))).expect("accept");
