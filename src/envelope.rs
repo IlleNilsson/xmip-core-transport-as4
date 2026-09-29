@@ -5,7 +5,7 @@
 //! (ebMS 3.0 Core section 5.2, AS4 profile section 2).
 //!
 //! Written by hand and read with the estate's flat scan (`codec::xml`), by
-//! local name, so a partner's prefix — `eb:`, `eb3:`, `ns2:` — does not
+//! local name, so a Party's prefix — `eb:`, `eb3:`, `ns2:` — does not
 //! matter; what matters is the element (ADR-0044).
 
 use codec::civil::CivilTime;
@@ -277,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn a_partner_prefix_does_not_matter_and_a_hollow_envelope_is_refused() {
+    fn a_party_prefix_does_not_matter_and_a_hollow_envelope_is_refused() {
         let theirs = "<S:Envelope xmlns:S=\"x\"><S:Header><ns2:Messaging><ns2:UserMessage>\
             <ns2:MessageInfo><ns2:MessageId>1@them</ns2:MessageId></ns2:MessageInfo>\
             <ns2:PartyInfo><ns2:From><ns2:PartyId type=\"urn:x\">A</ns2:PartyId></ns2:From>\
