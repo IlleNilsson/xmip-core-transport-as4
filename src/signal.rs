@@ -16,8 +16,11 @@ use crate::envelope::{UserMessage, next_id, wrap};
 
 /// A body the receiver could not read as AS4.
 pub const VALUE_NOT_RECOGNIZED: &str = "EBMS:0001";
-/// A retryable failure on the receiver's side.
+/// Any other failure: with `503` one the sender retries, with a `4xx` a
+/// final one.
 pub const OTHER: &str = "EBMS:0004";
+/// A sender that could not be authenticated (ebMS 3.0 Core section 6.7.2).
+pub const FAILED_AUTHENTICATION: &str = "EBMS:0101";
 /// A message that is AS4 and not one this party takes.
 pub const POLICY_NONCOMPLIANCE: &str = "EBMS:0103";
 

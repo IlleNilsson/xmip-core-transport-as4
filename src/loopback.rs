@@ -5,7 +5,7 @@
 //! is an [`Unsigned`] twin whatever the near end was given.
 
 use std::net::TcpListener;
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use net::Endpoint;
 use transport::Transport;
@@ -13,6 +13,7 @@ use transport::error::{Result, protocol_error};
 use transport::listening::Listening;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 
+use crate::receipting::Receipting;
 use crate::{As4Transport, Unsigned};
 
 /// The party both ends of a loopback are.
@@ -33,10 +34,9 @@ impl As4Transport {
         Self {
             endpoint,
             template: self.template.clone(),
-            signer: Box::new(Unsigned),
+            receipting: Receipting::new(Arc::new(Unsigned)),
             check: None,
             timeout: self.timeout,
-            seen: Mutex::new(Vec::new()),
             connections: self.connections.clone(),
             inbound: crate::Inbound::new(),
         }
