@@ -8,6 +8,16 @@ A Receive Location keeps its listener, bound on the first receive, and the conne
 
 The Party's endpoint is kept as written and read by `net::Endpoint` in [xmip-core-library-net](https://github.com/IlleNilsson/xmip-core-library-net) under the schemes this technology declares, `as4::SCHEMES` — `as4://` is `http://`, `as4s://` is `https://` — which Peppol reads its access point under too. Until 2026-09-28 an `as_http` function rewrote the URL before it was read.
 
+## Acknowledged after the receive cycle
+
+A Party waits on its connection for its Receipt until the runtime's whole receive cycle has ended (runtime-model section 5): `As4Transport::take_next`, and `receive` through it. The cycle ends in one of three verdicts (`receipting::Receipting::answer`):
+
+- **Accepted**: the signed Receipt is written and the message id is remembered for reception awareness.
+- **Refused**: an ebMS Error of severity `failure` (ebMS 3.0 Core section 6.7) — `EBMS:0101` `FailedAuthentication` for a sender not identified, `EBMS:0004` Other for one not permitted or content refused — answered with HTTP's `401`, `403` or `422` (`http::server::refused`). The sending MSH takes it as final and does not send the message again; the id is not remembered.
+- **Failed**: `503` with an ebMS Error `EBMS:0004`, a transient failure the sending MSH retries; the id is not remembered, so the message sent again is delivered.
+
+ A message seen before is receipted again at once and not handed up again; one that is not AS4, not for this party or refused by the profile's check (`checking`, which reads the header and the payload) is answered its Error at once. No round trip is added: the Receipt goes back on the same exchange, only later.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

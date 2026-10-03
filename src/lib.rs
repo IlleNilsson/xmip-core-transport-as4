@@ -30,19 +30,21 @@
 //! `as4://peer/msh?from=Buyer&message-id=1.2@xmip&action=Submit`.
 
 pub mod envelope;
+mod hearing;
 mod loopback;
 pub mod mime;
+mod receipting;
 mod settings;
 pub mod signal;
 pub mod signer;
 
-use std::net::{SocketAddr, TcpListener};
-use std::sync::Mutex;
+use std::net::TcpListener;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub use envelope::UserMessage;
 use http::endpoint::{Connections, Offer};
-use http::inbound::Inbound;
+use http::inbound::{Heard, Inbound};
 use http::server;
 use net::http::{Request, Response};
 use net::{Endpoint, Schemes};
@@ -50,29 +52,29 @@ pub use signal::Signal;
 pub use signer::{Signer, Unsigned};
 use transport::error::{Result, TransportError, protocol_error};
 use transport::socket;
-use transport::{Arrived, Directions, Transport};
+use transport::{Acknowledgement, Arrived, Directions, Taken, Transport, Verdict};
 
-/// What a message must satisfy beyond being addressed to this party — a
-/// profile's own rules — checked before the Receipt is written.
-pub type Check = Box<dyn Fn(&UserMessage) -> Result<()> + Send + Sync>;
+use crate::receipting::Receipting;
+
+/// What a message and its payload must satisfy beyond being addressed to
+/// this party — a profile's own rules — checked as the message is read,
+/// and answered with an Error at once where they are not.
+pub type Check = Box<dyn Fn(&UserMessage, &[u8]) -> Result<()> + Send + Sync>;
 
 /// What one message taken off a Party's POST came to: the message and its
-/// Stream, or `None` where it was one seen before.
+/// Stream, its Party waiting for the verdict, or `None` where it was one
+/// seen before.
 pub type Received = Result<Option<(UserMessage, Arrived)>>;
-
-/// How many message ids are remembered for reception awareness before the
-/// oldest is forgotten.
-const REMEMBERED: usize = 1024;
 
 pub struct As4Transport {
     /// The Party's endpoint to send to, or the address to listen at.
     endpoint: String,
     /// The message every send is a fresh copy of; its `from` is this party.
     template: UserMessage,
-    signer: Box<dyn Signer>,
+    /// The signer, and the message ids taken.
+    receipting: Receipting,
     check: Option<Check>,
     timeout: Option<Duration>,
-    seen: Mutex<Vec<String>>,
     /// The connections kept to Parties' endpoints.
     connections: Connections,
     /// The listener a Receive Location keeps, and Parties' connections.
@@ -89,10 +91,9 @@ impl As4Transport {
         Self {
             endpoint: endpoint.into(),
             template: UserMessage::new(me, party, envelope::TEST_SERVICE, envelope::TEST_ACTION),
-            signer: Box::new(Unsigned),
+            receipting: Receipting::new(Arc::new(Unsigned)),
             check: None,
             timeout: None,
-            seen: Mutex::new(Vec::new()),
             connections: Connections::new(),
             inbound: Inbound::new(),
         }
@@ -114,11 +115,12 @@ impl As4Transport {
         self
     }
 
-    /// Refuse, with an Error signal, any message `check` refuses.
+    /// Refuse, with an Error signal, any message whose header or payload
+    /// `check` refuses.
     #[must_use]
     pub fn checking(
         mut self,
-        check: impl Fn(&UserMessage) -> Result<()> + Send + Sync + 'static,
+        check: impl Fn(&UserMessage, &[u8]) -> Result<()> + Send + Sync + 'static,
     ) -> Self {
         self.check = Some(Box::new(check));
         self
@@ -127,7 +129,7 @@ impl As4Transport {
     /// Sign with this, and verify with it.
     #[must_use]
     pub fn signing_with(mut self, signer: impl Signer + 'static) -> Self {
-        self.signer = Box::new(signer);
+        self.receipting = Receipting::new(Arc::new(signer));
         self
     }
 
@@ -154,31 +156,68 @@ impl As4Transport {
     }
 
     /// Accept one message on an already-bound listener and answer its
-    /// Receipt; `None` where it was one seen before, receipted again and
-    /// not delivered again.
+    /// Receipt at once: what a far end does, which holds what it took
+    /// whole. `None` where it was one seen before, receipted again and not
+    /// delivered again.
     ///
     /// # Errors
     /// Where the connection broke, the POST is not an AS4 message, or the
     /// message is refused — each answered with the Error that says so
     /// before the error is returned.
-    pub fn accept_one(&self, listener: &TcpListener) -> Result<Option<(UserMessage, Arrived)>> {
+    pub fn accept_one(&self, listener: &TcpListener) -> Result<Option<(UserMessage, Taken)>> {
         server::serve_one_from(listener, self.timeout, |request, peer| {
-            self.answer(request, peer)
+            let heard = match self.hear(request, peer) {
+                Heard::Answered(said, answer) => return (said.map(|_| None), answer),
+                Heard::Waiting(heard) => heard,
+            };
+            match heard {
+                Ok(Some((message, origin, bytes))) => {
+                    match self.receipting.answer(&message, Verdict::Accepted) {
+                        Ok(receipt) => (Ok(Some((message, Taken::new(origin, bytes)))), receipt),
+                        // This side could not sign; the Party sends again.
+                        Err(error) => (Err(error), Response::new(500)),
+                    }
+                }
+                other => (other.map(|_| None), Response::new(500)),
+            }
         })?
     }
 
     /// The next message from whichever Party posts first, on the listener
-    /// the first call bound and kept, answered as [`Self::accept_one`]
-    /// answers: what a Receive Location, and Peppol's access point, take.
+    /// the first call bound and kept: what a Receive Location, and
+    /// Peppol's access point, take. The Party waits for its answer until
+    /// the arrival is given its verdict: its signed Receipt on
+    /// [`Verdict::Accepted`]; a final ebMS Error and the `4xx` that says
+    /// why on [`Verdict::Refused`], so the Party does not send it again;
+    /// `503` and an ebMS Error `EBMS:0004` on [`Verdict::Failed`], so the
+    /// Party sends it again (`receipting::Receipting::answer`). A message seen
+    /// before is receipted again at once and is `None`; one refused is
+    /// answered its Error at once and is the error.
     ///
     /// # Errors
     /// As [`Self::accept_one`], and where nothing arrived in time.
     pub fn take_next(&self) -> Received {
-        self.inbound.next(
+        let (heard, reply) = self.inbound.next(
             || self.bind(),
             self.timeout,
-            |request, peer| self.answer(request, peer),
-        )?
+            |request, peer| self.hear(&request, peer),
+        )?;
+        let Some((message, origin, bytes)) = heard? else {
+            return Ok(None);
+        };
+        let reply = reply.ok_or_else(|| protocol_error("a message answered unheard"))?;
+        let receipting = self.receipting.clone();
+        let answered = message.clone();
+        let acknowledgement = Acknowledgement::deferred(move |verdict| {
+            // A Receipt that cannot be signed lets the Party go unanswered
+            // — the dropped reply shuts its connection — and it resends.
+            let answer = receipting.answer(&answered, verdict)?;
+            reply.answer(&answer)
+        });
+        Ok(Some((
+            message,
+            Arrived::whole(origin, bytes, acknowledgement),
+        )))
     }
 
     /// Bind the listener [`Self::take_next`] keeps now, where no receive
@@ -188,106 +227,6 @@ impl As4Transport {
     /// Where the address is taken, malformed, or not permitted.
     pub fn listening(&self) -> Result<&str> {
         self.inbound.bound(|| self.bind())
-    }
-
-    /// What one POST from `peer` earns: the message it carries and its
-    /// Receipt — `None` where it was seen before, receipted again and not
-    /// delivered again — or the Error, with the status that says why.
-    fn answer(&self, request: &Request, peer: SocketAddr) -> (Received, Response) {
-        let (ref_to, code, taken) = match self.unpack(request) {
-            Err(error) => (None, signal::VALUE_NOT_RECOGNIZED, Err(error)),
-            Ok((message, bytes)) => {
-                let id = Some(message.message_id.clone());
-                match self.admit(&message) {
-                    Ok(()) => (id, "", Ok((message, bytes))),
-                    Err(error) => (id, signal::POLICY_NONCOMPLIANCE, Err(error)),
-                }
-            }
-        };
-        match taken {
-            Ok((message, bytes)) => {
-                let receipt = match self.signer.sign(Signal::receipt(&message), &[]) {
-                    Ok(receipt) => receipt,
-                    // This side could not sign; the Party sends again.
-                    Err(error) => return (Err(error), Response::new(500)),
-                };
-                let answer = soap(200, &receipt);
-                if self.remember(&message.message_id) {
-                    return (Ok(None), answer);
-                }
-                let origin = format!(
-                    "as4://{peer}{}?from={}&message-id={}&action={}",
-                    request.path, message.from, message.message_id, message.action
-                );
-                (Ok(Some((message, Arrived::new(origin, bytes)))), answer)
-            }
-            Err(error) => {
-                let (status, code) = if error.retryable {
-                    (503, signal::OTHER)
-                } else {
-                    (400, code)
-                };
-                let fault = Signal::error(ref_to.as_deref(), code, &error.message);
-                (Err(error), soap(status, &fault))
-            }
-        }
-    }
-
-    /// The User Message a request carries and its payload, the signature
-    /// verified.
-    fn unpack(&self, request: &Request) -> Result<(UserMessage, Vec<u8>)> {
-        if request.method != "POST" {
-            return Err(protocol_error(format!(
-                "an AS4 message is a POST, not a {}",
-                request.method
-            )));
-        }
-        let content_type = request.header_value("Content-Type").unwrap_or_default();
-        let (envelope, attachments) = mime::unpack(content_type, &request.body)?;
-        self.signer.verify(&envelope, &attachments)?;
-        let message = UserMessage::from_envelope(&envelope)?;
-        let bytes = attachments
-            .into_iter()
-            .find(|(cid, _)| *cid == message.payload_cid)
-            .map(|(_, bytes)| bytes)
-            .ok_or_else(|| {
-                protocol_error(format!(
-                    "a message whose payload cid:{} is not attached",
-                    message.payload_cid
-                ))
-            })?;
-        Ok((message, bytes))
-    }
-
-    /// Whether this party takes `message`: addressed to it, and what the
-    /// profile checks.
-    fn admit(&self, message: &UserMessage) -> Result<()> {
-        if message.to != self.template.from {
-            return Err(protocol_error(format!(
-                "a message for {}, and this party is {}",
-                message.to, self.template.from
-            )));
-        }
-        match &self.check {
-            Some(check) => check(message),
-            None => Ok(()),
-        }
-    }
-
-    /// Whether `message_id` was seen before; remembered either way.
-    fn remember(&self, message_id: &str) -> bool {
-        let mut seen = self
-            .seen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if seen.iter().any(|id| id == message_id) {
-            return true;
-        }
-        if seen.len() == REMEMBERED {
-            seen.remove(0);
-        }
-        seen.push(message_id.to_string());
-        false
     }
 
     /// Where a target names the Party's endpoint itself, or is empty and
@@ -305,7 +244,7 @@ impl As4Transport {
         let content_type = response.header_value("Content-Type").unwrap_or_default();
         let signal =
             mime::unpack(content_type, &response.body).and_then(|(envelope, attachments)| {
-                self.signer.verify(&envelope, &attachments)?;
+                self.receipting.signer.verify(&envelope, &attachments)?;
                 Signal::from_envelope(&envelope)
             });
         if !(200..300).contains(&response.status) {
@@ -336,14 +275,6 @@ impl As4Transport {
     }
 }
 
-/// `envelope` as the answer with `status`.
-fn soap(status: u16, envelope: &str) -> Response {
-    let (content_type, body) = mime::pack(envelope, &[]);
-    Response::new(status)
-        .header("Content-Type", &content_type)
-        .body(&body)
-}
-
 /// The schemes a Party's endpoint is written in: `as4://` is `http://`
 /// on the wire, and `as4s://` is `https://`. Public for the profiles that
 /// ride on AS4 and name an access point in its scheme: Peppol.
@@ -361,9 +292,16 @@ impl Transport for As4Transport {
         Directions::BOTH
     }
 
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Unordered(
+            "each request is its own, and a connection waiting for its answer takes no next request",
+        )
+    }
+
     /// The next message from whichever Party posts first, on the listener
     /// the first receive bound and the connections Parties keep; nothing
-    /// where it was seen before.
+    /// where it was seen before. The Party waits for its Receipt until the
+    /// verdict ([`Self::take_next`]).
     fn receive(&self) -> Result<Vec<Arrived>> {
         Ok(self
             .take_next()?
@@ -376,7 +314,10 @@ impl Transport for As4Transport {
         let endpoint = Endpoint::parse_under(self.resolve(target), &SCHEMES)?;
         let message = self.template.fresh();
         let attachments = vec![(message.payload_cid.clone(), bytes.to_vec())];
-        let envelope = self.signer.sign(message.envelope(), &attachments)?;
+        let envelope = self
+            .receipting
+            .signer
+            .sign(message.envelope(), &attachments)?;
         let (content_type, body) = mime::pack(&envelope, &attachments);
         let request = Request::new("POST", endpoint.path())
             .header("Host", &endpoint.authority())
@@ -393,6 +334,7 @@ impl Transport for As4Transport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receipting::soap;
     use net::http::{exchange, read_request, write_response};
     use std::io::{Read, Write};
 
@@ -423,7 +365,8 @@ mod tests {
             buyer.connections.opened()
         });
         for round in 0..5u8 {
-            assert_eq!(seller.receive().expect("received")[0].bytes, [round]);
+            let mut arrived = seller.receive().expect("received");
+            assert_eq!(arrived.remove(0).taken().expect("taken").bytes, [round]);
         }
         assert_eq!(
             buyer.join().expect("buyer"),
@@ -480,6 +423,62 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_cycle_answers_an_error_and_the_message_sent_again_is_taken() {
+        let (seller, _, _) = far_end();
+        let address = seller.listening().expect("bound").to_string();
+        let sender = std::thread::spawn(move || {
+            let near = near(&address, "Buyer", "Seller");
+            let message = near.template().fresh();
+            let near = near.shaped(message);
+            let attachments = vec![(envelope::PAYLOAD_CID.to_string(), b"twice".to_vec())];
+            let (content_type, body) = mime::pack(&near.template().envelope(), &attachments);
+            let mut said = Vec::new();
+            for _ in 0..3 {
+                let request = Request::new("POST", "/msh")
+                    .header("Host", &address)
+                    .header("Content-Type", &content_type)
+                    .body(&body);
+                let at = Endpoint::parse(&format!("http://{address}"))?;
+                let connection = http::endpoint::connect(&at, Some(secs(2)))?;
+                let response = exchange(connection, &request)?;
+                said.push(near.verify_receipt(&response, near.template()));
+            }
+            Ok::<_, TransportError>(said)
+        });
+        let (_, first) = seller.take_next().expect("first").expect("new");
+        assert!(first.defers());
+        assert!(!sender.is_finished(), "no Receipt before the verdict");
+        first.failed().expect("failed");
+        let (_, again) = seller
+            .take_next()
+            .expect("again")
+            .expect("not seen: failed");
+        assert_eq!(again.taken().expect("taken").bytes, b"twice");
+        assert!(seller.take_next().expect("third").is_none(), "taken once");
+        let said = sender.join().expect("thread").expect("exchanged");
+        let refused = said[0].as_ref().expect_err("refused");
+        assert!(refused.retryable, "{refused}");
+        assert!(refused.message.contains("503"), "{refused}");
+        assert!(refused.message.contains("EBMS:0004"), "{refused}");
+        assert!(said[1].is_ok() && said[2].is_ok(), "{said:?}");
+    }
+
+    #[test]
+    fn a_refused_cycle_answers_a_final_error_and_the_party_does_not_send_again() {
+        let (seller, _, _) = far_end();
+        let address = seller.listening().expect("bound").to_string();
+        let buyer = std::thread::spawn(move || near(&address, "Buyer", "Seller").send("", b"no"));
+        let (_, first) = seller.take_next().expect("first").expect("new");
+        first
+            .refused(transport::Refusal::Unidentified)
+            .expect("refused");
+        let refused = buyer.join().expect("buyer").expect_err("refused");
+        assert!(!refused.retryable, "final: {refused}");
+        assert!(refused.message.contains("401"), "{refused}");
+        assert!(refused.message.contains("EBMS:0101"), "{refused}");
+    }
+
+    #[test]
     fn a_post_that_is_not_as4_is_answered_with_an_error_signal() {
         let (far_end, listener, address) = far_end();
         let poster = std::thread::spawn(move || {
@@ -508,7 +507,7 @@ mod tests {
         assert!(!error.retryable);
         assert!(error.message.contains("EBMS:0103"), "{error}");
         let (seller, listener, address) = far_end();
-        let strict = seller.checking(|message| {
+        let strict = seller.checking(|message, _| {
             if message.action == "Submit" {
                 Ok(())
             } else {
