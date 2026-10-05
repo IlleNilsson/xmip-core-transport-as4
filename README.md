@@ -18,6 +18,10 @@ A Party waits on its connection for its Receipt until the runtime's whole receiv
 
  A message seen before is receipted again at once and not handed up again; one that is not AS4, not for this party or refused by the profile's check (`checking`, which reads the header and the payload) is answered its Error at once. No round trip is added: the Receipt goes back on the same exchange, only later.
 
+## The deduplication key
+
+A keyed send (`Transport::send_keyed`, built 2026-10-04) carries the Journey's identifier as the User Message's `eb:MessageId`, `key@xmip` (`envelope::message_id_of`), and the conversation it opens, the same on every attempt of one Journey. A receiving MSH that has seen the id receipts it again and does not deliver it again — this crate's own receive does (`receipting::Receipting::seen`). An unkeyed `send` carries a random id, as before.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

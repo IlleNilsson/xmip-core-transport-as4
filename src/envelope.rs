@@ -93,6 +93,22 @@ impl UserMessage {
         }
     }
 
+    /// This message, its `eb:MessageId` — and the conversation it opens —
+    /// formed from `key` where there is one ([`message_id_of`]): the same on
+    /// every attempt of one delivery, which a receiving MSH detects a
+    /// duplicate by and receipts again rather than deliver again.
+    #[must_use]
+    pub fn keyed(self, key: Option<&str>) -> Self {
+        match key {
+            Some(key) => Self {
+                message_id: message_id_of(key),
+                conversation_id: message_id_of(key),
+                ..self
+            },
+            None => self,
+        }
+    }
+
     /// The `eb:UserMessage` element alone, as the envelope and the Receipt
     /// both carry it.
     #[must_use]
@@ -247,6 +263,13 @@ pub fn wrap(messaging: &str) -> String {
          <eb:Messaging S12:mustUnderstand=\"true\">{messaging}</eb:Messaging>\
          </S12:Header><S12:Body/></S12:Envelope>"
     )
+}
+
+/// The `eb:MessageId` a keyed message carries: `key@xmip`, the form of
+/// every message id this crate writes.
+#[must_use]
+pub fn message_id_of(key: &str) -> String {
+    format!("{key}@xmip")
 }
 
 /// A message id no other message carries: 128 random bits in hex, `@xmip`.
