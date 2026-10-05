@@ -311,8 +311,22 @@ impl Transport for As4Transport {
     }
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+        self.post(target, bytes, None)
+    }
+
+    /// The key is the User Message's `eb:MessageId`, `key@xmip`
+    /// ([`envelope::message_id_of`]): a receiving MSH that has seen it
+    /// receipts it again and does not deliver it again.
+    fn send_keyed(&self, target: &str, bytes: &[u8], key: &str) -> Result<()> {
+        self.post(target, bytes, Some(key))
+    }
+}
+
+impl As4Transport {
+    /// The one send: one User Message posted and its Receipt verified.
+    fn post(&self, target: &str, bytes: &[u8], key: Option<&str>) -> Result<()> {
         let endpoint = Endpoint::parse_under(self.resolve(target), &SCHEMES)?;
-        let message = self.template.fresh();
+        let message = self.template.fresh().keyed(key);
         let attachments = vec![(message.payload_cid.clone(), bytes.to_vec())];
         let envelope = self
             .receipting
