@@ -171,9 +171,12 @@ impl As4Transport {
                 Heard::Waiting(heard) => heard,
             };
             match heard {
-                Ok(Some((message, origin, bytes))) => {
+                Ok(Some((message, origin, bytes, sender))) => {
                     match self.receipting.answer(&message, Verdict::Accepted) {
-                        Ok(receipt) => (Ok(Some((message, Taken::new(origin, bytes)))), receipt),
+                        Ok(receipt) => {
+                            let taken = sender.taken(Taken::new(origin, bytes));
+                            (Ok(Some((message, taken))), receipt)
+                        }
                         // This side could not sign; the Party sends again.
                         Err(error) => (Err(error), Response::new(500)),
                     }
@@ -202,7 +205,7 @@ impl As4Transport {
             self.timeout,
             |request, peer| self.hear(&request, peer),
         )?;
-        let Some((message, origin, bytes)) = heard? else {
+        let Some((message, origin, bytes, sender)) = heard? else {
             return Ok(None);
         };
         let reply = reply.ok_or_else(|| protocol_error("a message answered unheard"))?;
@@ -216,7 +219,7 @@ impl As4Transport {
         });
         Ok(Some((
             message,
-            Arrived::whole(origin, bytes, acknowledgement),
+            sender.on(Arrived::whole(origin, bytes, acknowledgement)),
         )))
     }
 

@@ -8,6 +8,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 
 use net::Endpoint;
+use transport::ArrivalIdentity;
 use transport::Transport;
 use transport::error::{Result, protocol_error};
 use transport::listening::Listening;
@@ -44,6 +45,10 @@ impl As4Transport {
 }
 
 impl Loopback for As4Transport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        http::server::REQUEST
+    }
+
     /// A bound MSH waiting for its one User Message, which it receipts.
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         let transport = self.twin(self.endpoint.clone());
