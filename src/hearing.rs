@@ -6,6 +6,7 @@
 use std::net::SocketAddr;
 
 use http::inbound::Heard;
+use http::server;
 use net::http::{Request, Response};
 use transport::error::{Result, TransportError, protocol_error};
 
@@ -15,8 +16,9 @@ use crate::mime;
 use crate::receipting::soap;
 use crate::signal::{self, Signal};
 
-/// A new message heard: the message, its origin and its payload.
-pub type Held = (UserMessage, String, Vec<u8>);
+/// A new message heard: the message, its origin, its payload, and what
+/// the request said of its sender.
+pub type Held = (UserMessage, String, Vec<u8>, server::Sender);
 
 /// What one POST is heard as: a new message waiting for its verdict;
 /// `None`, answered its Receipt again, for one seen before; or the error,
@@ -48,7 +50,8 @@ impl As4Transport {
             "as4://{peer}{}?from={}&message-id={}&action={}",
             request.path, message.from, message.message_id, message.action
         );
-        Heard::Waiting(Ok(Some((message, origin, bytes))))
+        let sender = server::Sender::of(request, peer);
+        Heard::Waiting(Ok(Some((message, origin, bytes, sender))))
     }
 
     /// The User Message a request carries and its payload, the signature
