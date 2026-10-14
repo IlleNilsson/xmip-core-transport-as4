@@ -410,7 +410,7 @@ mod tests {
         let second = pair.round(&long).expect("second");
         assert_eq!(second.bytes, long);
         let third = pair.round(b"").expect("third");
-        assert!(third.bytes.is_empty());
+        assert_eq!(third.bytes, [] as [u8; 0]);
         assert_eq!(pair.name(), "as4");
         assert_eq!(pair.directions(), Directions::BOTH);
         assert!(pair.claims().is_none());

@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(body, b"<Receipt/>");
         let (envelope, back) = unpack(&content_type, &body).expect("unpacked");
         assert_eq!(envelope, "<Receipt/>");
-        assert!(back.is_empty());
+        assert_eq!(back, [] as [(String, std::vec::Vec<u8>); 0]);
     }
 
     #[test]
