@@ -26,9 +26,9 @@ fn a_keyed_message_carries_the_journey_id_as_its_message_id_and_is_delivered_onc
             .collect::<Vec<_>>()
     });
     let near = As4Transport::new(format!("as4://{address}/msh"), "Buyer", "Seller");
-    near.send_keyed("", b"order", KEY)
+    near.send_from("", transport::Outgoing::held(b"order").keyed(KEY))
         .expect("sent, its Receipt verified");
-    near.send_keyed("", b"order", KEY)
+    near.send_from("", transport::Outgoing::held(b"order").keyed(KEY))
         .expect("sent again, receipted again");
     near.send("", b"order").expect("sent unkeyed");
     let taken = taking.join().expect("far end");
