@@ -309,7 +309,7 @@ impl Transport for As4Transport {
     /// the first receive bound and the connections Parties keep; nothing
     /// where it was seen before. The Party waits for its Receipt until the
     /// verdict ([`Self::take_next`]).
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
         Ok(self
             .take_next()?
             .map(|(_, arrived)| arrived)
@@ -317,15 +317,18 @@ impl Transport for As4Transport {
             .collect())
     }
 
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        self.post(target, bytes, None)
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered(
+            "the User Message is signed whole, its digest taken over all of it",
+        )
     }
 
     /// The key is the User Message's `eb:MessageId`, `key@xmip`
     /// ([`envelope::message_id_of`]): a receiving MSH that has seen it
     /// receipts it again and does not deliver it again.
-    fn send_keyed(&self, target: &str, bytes: &[u8], key: &str) -> Result<()> {
-        self.post(target, bytes, Some(key))
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
+        self.post(target, bytes, outgoing.key())
     }
 }
 
