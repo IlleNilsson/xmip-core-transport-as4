@@ -58,6 +58,14 @@ impl Configured for As4Transport {
         ],
     };
 
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = &["as4", "as4s"];
+
+    /// The whole address: its scheme says whether TLS guards the endpoint.
+    fn own_terms(address: &str) -> &str {
+        address
+    }
+
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         // Unsigned until the Location's credentials supply the certificate.
         let transport = Self::new(
