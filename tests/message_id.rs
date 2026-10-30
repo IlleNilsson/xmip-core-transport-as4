@@ -1,5 +1,5 @@
 //! A keyed send carries its deduplication key as the User Message's
-//! `eb:MessageId`, `key@xmip`, the same on every attempt of one Journey:
+//! `eb:MessageId`, `key@xmip`, the same on every attempt on one Journey:
 //! the receiving MSH receipts the repeat again and does not deliver it
 //! again. An unkeyed send carries an id of its own.
 
