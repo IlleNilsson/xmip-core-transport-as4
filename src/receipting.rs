@@ -15,7 +15,8 @@
 //! Party keeps the message and sends it again. A message seen before is
 //! receipted again at once and not handed up again.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use xcore::lock::Locked;
 
 use http::server;
 use net::http::Response;
@@ -56,11 +57,7 @@ impl Receipting {
 
     /// Whether `message_id` was taken before.
     pub fn seen(&self, message_id: &str) -> bool {
-        self.seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .any(|id| id == message_id)
+        self.seen.locked().iter().any(|id| id == message_id)
     }
 
     /// The answer `verdict` earns `message`: its signed Receipt, the id
@@ -98,7 +95,7 @@ impl Receipting {
     }
 
     fn remember(&self, message_id: &str) {
-        let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut seen = self.seen.locked();
         if seen.iter().any(|id| id == message_id) {
             return;
         }
