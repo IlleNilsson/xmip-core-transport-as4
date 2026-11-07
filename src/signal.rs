@@ -104,6 +104,7 @@ fn info(ref_to: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     #[test]
     fn a_receipt_names_the_message_it_answers_and_carries_a_copy_of_it() {
@@ -133,10 +134,10 @@ mod tests {
         );
         let unread = Signal::error(None, VALUE_NOT_RECOGNIZED, "not AS4");
         assert!(!unread.contains("RefToMessageId"));
-        assert!(matches!(
+        assert_matches!(
             Signal::from_envelope(&unread),
             Ok(Signal::Error { ref_to: None, .. })
-        ));
+        );
     }
 
     #[test]
