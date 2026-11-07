@@ -512,7 +512,7 @@ mod tests {
                 .expect("write");
             let mut answer = Vec::new();
             stream.read_to_end(&mut answer).expect("read");
-            String::from_utf8_lossy(&answer).into_owned()
+            String::from_utf8_lossy_owned(answer)
         });
         let error = far_end.accept_one(&listener).expect_err("not AS4");
         assert!(!error.retryable, "{error}");
