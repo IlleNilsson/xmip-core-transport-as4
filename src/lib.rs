@@ -233,13 +233,9 @@ impl As4Transport {
     }
 
     /// Where a target names the Party's endpoint itself, or is empty and
-    /// means the one configured.
+    /// means the one configured (`transport::destination::named`).
     fn resolve<'a>(&'a self, target: &'a str) -> &'a str {
-        if target.is_empty() {
-            &self.endpoint
-        } else {
-            target
-        }
+        transport::destination::named(target).unwrap_or(&self.endpoint)
     }
 
     /// The Signal the Party answered, held against what was sent.
@@ -280,9 +276,11 @@ impl As4Transport {
 
 /// The schemes a Party's endpoint is written in: `as4://` is `http://`
 /// on the wire, and `as4s://` is `https://`. Public for the profiles that
-/// ride on AS4 and name an access point in its scheme: Peppol.
+/// ride on AS4 and name an access point in its scheme: Peppol, whose
+/// Location's address, `peppol://`, is `as4://` on the wire (ADR-0064,
+/// amendment 2026-11-10).
 pub const SCHEMES: Schemes = Schemes {
-    plain: &["http", "as4"],
+    plain: &["http", "as4", "peppol"],
     secure: &["https", "as4s"],
 };
 
