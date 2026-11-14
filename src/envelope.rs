@@ -12,6 +12,7 @@ use codec::civil::CivilTime;
 use codec::xml::{self, escape};
 use codec::{hex, random};
 use transport::error::{Result, protocol_error};
+use xcore::{Clock, SystemClock};
 
 /// The ebMS 3.0 core namespace.
 pub const EBMS: &str = "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/";
@@ -62,7 +63,7 @@ impl UserMessage {
         Self {
             conversation_id: message_id.clone(),
             message_id,
-            timestamp: CivilTime::now().rfc3339(),
+            timestamp: timestamp_now(),
             from: from.to_string(),
             to: to.to_string(),
             service: service.to_string(),
@@ -88,7 +89,7 @@ impl UserMessage {
         Self {
             conversation_id: message_id.clone(),
             message_id,
-            timestamp: CivilTime::now().rfc3339(),
+            timestamp: timestamp_now(),
             ..self.clone()
         }
     }
@@ -275,6 +276,12 @@ pub fn message_id_of(key: &str) -> String {
 /// A message id no other message carries: 128 random bits in hex, `@xmip`.
 pub(crate) fn next_id() -> String {
     format!("{}@xmip", hex::encode(&random::array::<16>()))
+}
+
+/// The `eb:Timestamp` a message or a signal made now carries: RFC 3339 in
+/// UTC to the second, off the one clock (`xcore::Clock`).
+pub(crate) fn timestamp_now() -> String {
+    CivilTime::from_unix(SystemClock.unix_seconds()).rfc3339()
 }
 
 #[cfg(test)]

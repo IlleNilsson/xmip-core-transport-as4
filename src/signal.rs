@@ -8,11 +8,10 @@
 //! carries instead is the Signer's to add. An Error carries the ebMS code
 //! and a description the sender can read in a log.
 
-use codec::civil::CivilTime;
 use codec::xml::{self, escape};
 use transport::error::{Result, protocol_error};
 
-use crate::envelope::{UserMessage, next_id, wrap};
+use crate::envelope::{UserMessage, next_id, timestamp_now, wrap};
 
 /// A body the receiver could not read as AS4.
 pub const VALUE_NOT_RECOGNIZED: &str = "EBMS:0001";
@@ -96,7 +95,7 @@ fn info(ref_to: Option<&str>) -> String {
     format!(
         "<eb:MessageInfo><eb:Timestamp>{}</eb:Timestamp><eb:MessageId>{}</eb:MessageId>\
          {reference}</eb:MessageInfo>",
-        CivilTime::now().rfc3339(),
+        timestamp_now(),
         escape(&next_id())
     )
 }
