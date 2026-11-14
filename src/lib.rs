@@ -51,7 +51,6 @@ use net::{Endpoint, Schemes};
 pub use signal::Signal;
 pub use signer::{Signer, Unsigned};
 use transport::error::{Result, TransportError, protocol_error};
-use transport::socket;
 use transport::{Acknowledgement, Arrived, Directions, Taken, Transport, Verdict};
 
 use crate::receipting::Receipting;
@@ -147,12 +146,14 @@ impl As4Transport {
     }
 
     /// Bind at the endpoint's authority as the far end Parties post to,
-    /// and report the address actually assigned.
+    /// in the clear, and report the address actually assigned: `as4s://`
+    /// is refused as asking for TLS (`http::server::listen`).
     ///
     /// # Errors
-    /// Where the address is taken, malformed, or not permitted.
+    /// Where the address asks for TLS, is taken, malformed, or not
+    /// permitted.
     pub fn bind(&self) -> Result<(TcpListener, String)> {
-        socket::bind_tcp(&Endpoint::parse_under(&self.endpoint, &SCHEMES)?.address())
+        server::listen(&self.endpoint, &SCHEMES)
     }
 
     /// Accept one message on an already-bound listener and answer its
@@ -168,6 +169,7 @@ impl As4Transport {
         server::serve_one_from(listener, self.timeout, |request, peer| {
             let heard = match self.hear(request, peer) {
                 Heard::Answered(said, answer) => return (said.map(|_| None), answer),
+                Heard::Refused(why, answer) => return (Err(why), answer),
                 Heard::Waiting(heard) => heard,
             };
             match heard {
@@ -195,7 +197,8 @@ impl As4Transport {
     /// `503` and an ebMS Error `EBMS:0004` on [`Verdict::Failed`], so the
     /// Party sends it again (`receipting::Receipting::answer`). A message seen
     /// before is receipted again at once and is `None`; one refused is
-    /// answered its Error at once and is the error.
+    /// answered its Error at once, its Party turned away
+    /// ([`Transport::turned_away`]), and the wait goes on for the others.
     ///
     /// # Errors
     /// As [`Self::accept_one`], and where nothing arrived in time.
@@ -328,6 +331,13 @@ impl Transport for As4Transport {
         let bytes: &[u8] = &outgoing.gather()?;
         self.post(target, bytes, outgoing.key())
     }
+
+    /// The Parties turned away at their own connection: a POST that is not
+    /// an AS4 message or one refused, a head past its bound, a read past
+    /// the timeout.
+    fn turned_away(&self) -> transport::Turned {
+        self.inbound.turned_away()
+    }
 }
 
 impl As4Transport {
@@ -359,6 +369,7 @@ mod tests {
     use crate::receipting::soap;
     use net::http::{exchange, read_request, write_response};
     use std::io::{Read, Write};
+    use transport::socket;
 
     fn secs(n: u64) -> Duration {
         Duration::from_secs(n)
@@ -396,6 +407,44 @@ mod tests {
             "one connection for every send"
         );
         assert_eq!(seller.inbound.open(), 1);
+    }
+
+    #[test]
+    fn a_receive_location_entered_as4s_never_listens_in_the_clear() {
+        let secure = As4Transport::new("as4s://127.0.0.1:0/msh", "Seller", "Buyer");
+        let refused = secure.bind().expect_err("no TLS termination yet");
+        assert!(!refused.retryable, "{refused}");
+        assert!(
+            refused
+                .message
+                .contains("enter it as as4://127.0.0.1:0/msh"),
+            "{refused}"
+        );
+        let error = secure.receive().expect_err("nothing served in the clear");
+        assert!(error.message.contains("asks for TLS"), "{error}");
+    }
+
+    #[test]
+    fn a_post_that_is_not_an_as4_message_turns_its_caller_away_and_the_next_is_taken() {
+        let (seller, _, _) = far_end();
+        let address = seller.listening().expect("bound").to_string();
+        let parties = std::thread::spawn(move || {
+            let at = Endpoint::parse(&format!("http://{address}/msh")).expect("parsed");
+            let stranger = Request::new("POST", "/msh")
+                .header("Host", &address)
+                .header("Content-Type", "text/plain")
+                .body(b"not a User Message");
+            let connection = http::endpoint::connect(&at, Some(secs(2))).expect("connect");
+            let refused = exchange(connection, &stranger).expect("answered");
+            near(&address, "Buyer", "Seller")
+                .send("", b"ISA")
+                .expect("receipted");
+            refused.status
+        });
+        let mut arrived = seller.receive().expect("the Location went on");
+        assert_eq!(arrived.remove(0).taken().expect("taken").bytes, b"ISA");
+        assert_eq!(parties.join().expect("parties"), 400);
+        assert_eq!(seller.turned_away().callers.len(), 1);
     }
 
     #[test]

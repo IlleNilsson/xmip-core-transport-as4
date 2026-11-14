@@ -21,8 +21,9 @@ use crate::signal::{self, Signal};
 pub type Held = (UserMessage, String, Vec<u8>, server::Sender);
 
 /// What one POST is heard as: a new message waiting for its verdict;
-/// `None`, answered its Receipt again, for one seen before; or the error,
-/// answered its Error.
+/// `None`, answered its Receipt again, for one seen before; one refused,
+/// answered its Error and its Party turned away; or this side's own
+/// failure to receipt, answered `500`.
 pub type Hearing = Heard<Result<Option<Held>>>;
 
 impl As4Transport {
@@ -106,5 +107,5 @@ fn refused(ref_to: Option<&str>, code: &str, error: TransportError) -> Hearing {
         (400, code)
     };
     let fault = Signal::error(ref_to, code, &error.message);
-    Heard::Answered(Err(error), soap(status, &fault))
+    Heard::Refused(error, soap(status, &fault))
 }
