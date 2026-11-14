@@ -85,6 +85,12 @@ impl Configured for As4Transport {
             None => transport,
         })
     }
+
+    /// Each caller's turn on a Receive Location taking at most `turn`.
+    fn turning_within(mut self, turn: std::time::Duration) -> Self {
+        self.inbound = self.inbound.turning_within(turn);
+        self
+    }
 }
 
 #[cfg(test)]
