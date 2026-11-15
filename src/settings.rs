@@ -47,14 +47,12 @@ impl Configured for As4Transport {
                           action when left out.",
                 applies: Applies::Send,
             },
-            Setting {
-                name: "timeout",
-                kind: Kind::Duration,
-                presence: Presence::Optional,
-                meaning: "How long a Party that stops mid-message is waited on; unbounded \
-                          when left out.",
-                applies: Applies::Both,
-            },
+            transport::configured::timeout(
+                Applies::Both,
+                None,
+                "How long a Party that stops mid-message is waited on; unbounded \
+                 when left out.",
+            ),
         ],
     };
 
@@ -66,6 +64,10 @@ impl Configured for As4Transport {
         address
     }
 
+    fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
+        Some(&mut self.timeout)
+    }
+
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         // Unsigned until the Location's credentials supply the certificate.
         let transport = Self::new(
@@ -73,17 +75,15 @@ impl Configured for As4Transport {
             settings.text("party_id"),
             settings.optional_text("to_party_id").unwrap_or_default(),
         );
-        let transport = match (
-            settings.optional_text("service"),
-            settings.optional_text("action"),
-        ) {
-            (Some(service), Some(action)) => transport.under(service, action),
-            _ => transport,
-        };
-        Ok(match settings.optional_duration("timeout") {
-            Some(timeout) => transport.timing_out_after(timeout),
-            None => transport,
-        })
+        Ok(
+            match (
+                settings.optional_text("service"),
+                settings.optional_text("action"),
+            ) {
+                (Some(service), Some(action)) => transport.under(service, action),
+                _ => transport,
+            },
+        )
     }
 
     /// Each caller's turn on a Receive Location taking at most `turn`.

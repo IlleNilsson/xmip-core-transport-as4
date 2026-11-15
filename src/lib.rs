@@ -132,13 +132,6 @@ impl As4Transport {
         self
     }
 
-    /// Give up on a Party that stops mid-message.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
     /// The message every send is a copy of.
     #[must_use]
     pub const fn template(&self) -> &UserMessage {
@@ -369,6 +362,7 @@ mod tests {
     use crate::receipting::soap;
     use net::http::{exchange, read_request, write_response};
     use std::io::{Read, Write};
+    use transport::Configured;
     use transport::socket;
 
     fn secs(n: u64) -> Duration {
