@@ -159,7 +159,8 @@ impl As4Transport {
     /// message is refused — each answered with the Error that says so
     /// before the error is returned.
     pub fn accept_one(&self, listener: &TcpListener) -> Result<Option<(UserMessage, Taken)>> {
-        server::serve_one_from(listener, self.timeout, |request, peer| {
+        let clock = Arc::clone(self.connections.clock());
+        server::serve_one_from(listener, self.timeout, clock, |request, peer| {
             let heard = match self.hear(request, peer) {
                 Heard::Answered(said, answer) => return (said.map(|_| None), answer),
                 Heard::Refused(why, answer) => return (Err(why), answer),
