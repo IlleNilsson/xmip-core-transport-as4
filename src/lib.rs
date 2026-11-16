@@ -197,11 +197,9 @@ impl As4Transport {
     /// # Errors
     /// As [`Self::accept_one`], and where nothing arrived in time.
     pub fn take_next(&self) -> Received {
-        let (heard, reply) = self.inbound.next(
-            || self.bind(),
-            self.timeout,
-            |request, peer| self.hear(&request, peer),
-        )?;
+        let (heard, reply) = self
+            .inbound
+            .next(self.timeout, |request, peer| self.hear(&request, peer))?;
         let Some((message, origin, bytes, sender)) = heard? else {
             return Ok(None);
         };
@@ -218,15 +216,6 @@ impl As4Transport {
             message,
             sender.on(Arrived::whole(origin, bytes, acknowledgement)),
         )))
-    }
-
-    /// Bind the listener [`Self::take_next`] keeps now, where no receive
-    /// has, and say where it is.
-    ///
-    /// # Errors
-    /// Where the address is taken, malformed, or not permitted.
-    pub fn listening(&self) -> Result<&str> {
-        self.inbound.bound(|| self.bind())
     }
 
     /// Where a target names the Party's endpoint itself, or is empty and
@@ -301,7 +290,7 @@ impl Transport for As4Transport {
     }
 
     /// The next message from whichever Party posts first, on the listener
-    /// the first receive bound and the connections Parties keep; nothing
+    /// its open bound and the connections Parties keep; nothing
     /// where it was seen before. The Party waits for its Receipt until the
     /// verdict ([`Self::take_next`]).
     fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
@@ -384,7 +373,11 @@ mod tests {
     #[test]
     fn every_receive_takes_from_one_kept_listener_and_one_kept_connection() {
         let (seller, _, _) = far_end();
-        let address = seller.listening().expect("bound").to_string();
+        let address = seller
+            .listening()
+            .expect("bound")
+            .expect("listens")
+            .to_string();
         let buyer = std::thread::spawn(move || {
             let buyer = near(&address, "Buyer", "Seller");
             for round in 0..5u8 {
@@ -415,14 +408,19 @@ mod tests {
                 .contains("enter it as as4://127.0.0.1:0/msh"),
             "{refused}"
         );
-        let error = secure.receive().expect_err("nothing served in the clear");
+        // Refused as its transport is opened, so the node's start is.
+        let error = secure.listening().expect_err("nothing served in the clear");
         assert!(error.message.contains("asks for TLS"), "{error}");
     }
 
     #[test]
     fn a_post_that_is_not_an_as4_message_turns_its_caller_away_and_the_next_is_taken() {
         let (seller, _, _) = far_end();
-        let address = seller.listening().expect("bound").to_string();
+        let address = seller
+            .listening()
+            .expect("bound")
+            .expect("listens")
+            .to_string();
         let parties = std::thread::spawn(move || {
             let at = Endpoint::parse(&format!("http://{address}/msh")).expect("parsed");
             let stranger = Request::new("POST", "/msh")
@@ -491,7 +489,11 @@ mod tests {
     #[test]
     fn a_failed_cycle_answers_an_error_and_the_message_sent_again_is_taken() {
         let (seller, _, _) = far_end();
-        let address = seller.listening().expect("bound").to_string();
+        let address = seller
+            .listening()
+            .expect("bound")
+            .expect("listens")
+            .to_string();
         let sender = std::thread::spawn(move || {
             let near = near(&address, "Buyer", "Seller");
             let message = near.template().fresh();
@@ -532,7 +534,11 @@ mod tests {
     #[test]
     fn a_refused_cycle_answers_a_final_error_and_the_party_does_not_send_again() {
         let (seller, _, _) = far_end();
-        let address = seller.listening().expect("bound").to_string();
+        let address = seller
+            .listening()
+            .expect("bound")
+            .expect("listens")
+            .to_string();
         let buyer = std::thread::spawn(move || near(&address, "Buyer", "Seller").send("", b"no"));
         let (_, first) = seller.take_next().expect("first").expect("new");
         first
