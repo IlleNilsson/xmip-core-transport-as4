@@ -99,6 +99,12 @@ impl Configured for As4Transport {
         self.connections = self.connections.timed_by(clock);
         self
     }
+
+    /// The listener [`As4Transport::take_next`] takes from, bound where a
+    /// Receive Location listens ([`As4Transport::bind`]).
+    fn listening(&self) -> Result<Option<&str>> {
+        self.inbound.bound(|| self.bind()).map(Some)
+    }
 }
 
 #[cfg(test)]
