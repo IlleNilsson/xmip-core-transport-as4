@@ -115,11 +115,9 @@ impl UserMessage {
     #[must_use]
     pub fn element(&self) -> String {
         let party_type = typed(self.party_type.as_deref());
-        let agreement = self
-            .agreement
-            .as_deref()
-            .map(|agreement| format!("<eb:AgreementRef>{}</eb:AgreementRef>", escape(agreement)))
-            .unwrap_or_default();
+        let agreement = self.agreement.as_deref().map_or_default(|agreement| {
+            format!("<eb:AgreementRef>{}</eb:AgreementRef>", escape(agreement))
+        });
         let properties = if self.properties.is_empty() {
             String::new()
         } else {
@@ -215,8 +213,7 @@ impl UserMessage {
 
 /// ` type="…"` where a type is given, nothing where none is.
 fn typed(kind: Option<&str>) -> String {
-    kind.map(|kind| format!(" type=\"{}\"", escape(kind)))
-        .unwrap_or_default()
+    kind.map_or_default(|kind| format!(" type=\"{}\"", escape(kind)))
 }
 
 /// `properties` as `eb:Property` elements, in order.
