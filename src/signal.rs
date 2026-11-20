@@ -90,8 +90,7 @@ impl Signal {
 /// The `eb:MessageInfo` of a signal: now, a new id, and what it answers.
 fn info(ref_to: Option<&str>) -> String {
     let reference = ref_to
-        .map(|id| format!("<eb:RefToMessageId>{}</eb:RefToMessageId>", escape(id)))
-        .unwrap_or_default();
+        .map_or_default(|id| format!("<eb:RefToMessageId>{}</eb:RefToMessageId>", escape(id)));
     format!(
         "<eb:MessageInfo><eb:Timestamp>{}</eb:Timestamp><eb:MessageId>{}</eb:MessageId>\
          {reference}</eb:MessageInfo>",
