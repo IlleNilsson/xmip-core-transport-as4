@@ -20,12 +20,6 @@ pub const EBMS: &str = "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/2
 pub const SOAP: &str = "http://www.w3.org/2003/05/soap-envelope";
 /// The content id the payload attachment carries.
 pub const PAYLOAD_CID: &str = "payload@xmip";
-/// The service two MSHs exchange under until a P-Mode names one (ebMS 3.0
-/// Core section 5.2.2.8).
-pub const TEST_SERVICE: &str =
-    "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/service";
-/// The action that goes with [`TEST_SERVICE`].
-pub const TEST_ACTION: &str = "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/test";
 
 const INITIATOR: &str = "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/initiator";
 const RESPONDER: &str = "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/responder";

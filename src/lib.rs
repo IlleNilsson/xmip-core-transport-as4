@@ -28,43 +28,75 @@
 //!
 //! The origin URI carries what the header knew:
 //! `as4://peer/msh?from=Buyer&message-id=1.2@xmip&action=Submit`.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and none of
+//! the code above, which is behind the default feature: what the surfaces'
+//! library carries (ADR-0064, amendment 2026-11-26).
 
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod envelope;
+#[cfg(feature = "default")]
 mod hearing;
+#[cfg(feature = "default")]
 mod loopback;
+#[cfg(feature = "default")]
 pub mod mime;
+#[cfg(feature = "default")]
 mod receipting;
+#[cfg(feature = "default")]
 mod settings;
+#[cfg(feature = "default")]
 pub mod signal;
+#[cfg(feature = "default")]
 pub mod signer;
 
+#[cfg(feature = "default")]
 use std::net::TcpListener;
+#[cfg(feature = "default")]
 use std::sync::Arc;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
+#[cfg(feature = "default")]
 pub use envelope::UserMessage;
+#[cfg(feature = "default")]
 use http::endpoint::{Connections, Offer};
+#[cfg(feature = "default")]
 use http::inbound::{Heard, Inbound};
+#[cfg(feature = "default")]
 use http::server;
+#[cfg(feature = "default")]
 use net::http::{Request, Response};
+#[cfg(feature = "default")]
 use net::{Endpoint, Schemes};
+#[cfg(feature = "default")]
 pub use signal::Signal;
+#[cfg(feature = "default")]
 pub use signer::{Signer, Unsigned};
+#[cfg(feature = "default")]
 use transport::error::{Result, TransportError, protocol_error};
+#[cfg(feature = "default")]
 use transport::{Acknowledgement, Arrived, Directions, Taken, Transport, Verdict};
 
+#[cfg(feature = "default")]
 use crate::receipting::Receipting;
 
 /// What a message and its payload must satisfy beyond being addressed to
 /// this party — a profile's own rules — checked as the message is read,
 /// and answered with an Error at once where they are not.
+#[cfg(feature = "default")]
 pub type Check = Box<dyn Fn(&UserMessage, &[u8]) -> Result<()> + Send + Sync>;
 
 /// What one message taken off a Party's POST came to: the message and its
 /// Stream, its Party waiting for the verdict, or `None` where it was one
 /// seen before.
+#[cfg(feature = "default")]
 pub type Received = Result<Option<(UserMessage, Arrived)>>;
 
+#[cfg(feature = "default")]
 pub struct As4Transport {
     /// The Party's endpoint to send to, or the address to listen at.
     endpoint: String,
@@ -80,6 +112,7 @@ pub struct As4Transport {
     inbound: Inbound,
 }
 
+#[cfg(feature = "default")]
 impl As4Transport {
     /// Speak as Party `me` to Party `party` at `endpoint` —
     /// `http://host:port/msh` or `as4://host:port/msh` — under the ebMS
@@ -89,7 +122,12 @@ impl As4Transport {
     pub fn new(endpoint: impl Into<String>, me: &str, party: &str) -> Self {
         Self {
             endpoint: endpoint.into(),
-            template: UserMessage::new(me, party, envelope::TEST_SERVICE, envelope::TEST_ACTION),
+            template: UserMessage::new(
+                me,
+                party,
+                declaration::TEST_SERVICE,
+                declaration::TEST_ACTION,
+            ),
             receipting: Receipting::new(Arc::new(Unsigned)),
             check: None,
             timeout: None,
@@ -265,11 +303,13 @@ impl As4Transport {
 /// ride on AS4 and name an access point in its scheme: Peppol, whose
 /// Location's address, `peppol://`, is `as4://` on the wire (ADR-0064,
 /// amendment 2026-11-10).
+#[cfg(feature = "default")]
 pub const SCHEMES: Schemes = Schemes {
     plain: &["http", "as4", "peppol"],
     secure: &["https", "as4s"],
 };
 
+#[cfg(feature = "default")]
 impl Transport for As4Transport {
     fn name(&self) -> &'static str {
         "as4"
@@ -323,6 +363,7 @@ impl Transport for As4Transport {
     }
 }
 
+#[cfg(feature = "default")]
 impl As4Transport {
     /// The one send: one User Message posted and its Receipt verified.
     fn post(&self, target: &str, bytes: &[u8], key: Option<&str>) -> Result<()> {

@@ -1,63 +1,16 @@
-//! What an AS4 Location is configured with: the declaration
-//! [`As4Transport`] reads its settings through (ADR-0064, amendment
-//! 2026-09-26).
+//! How an AS4 Location is built from what it is configured with: the
+//! declaration, [`crate::declaration`], which [`As4Transport`] reads its
+//! settings through (ADR-0064, amendments 2026-09-26 and 2026-11-26).
 
 use transport::Configured;
 use transport::error::Result;
-use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
+use xcore::settings::{Read, Settings};
 
-use crate::As4Transport;
-use crate::envelope::{TEST_ACTION, TEST_SERVICE};
+use crate::{As4Transport, declaration};
 
 impl Configured for As4Transport {
-    /// The address is the Party's MSH a Send Location posts to, or the
-    /// one a Receive Location listens at: `as4://host:port/msh`. The
-    /// WS-Security certificate is the Location's credentials, not a setting.
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            Setting {
-                name: "party_id",
-                kind: Kind::Text,
-                presence: Presence::Required,
-                meaning: "This Party's own id: the From of a sent User Message, the To a \
-                          received one must carry.",
-                applies: Applies::Both,
-            },
-            Setting {
-                name: "to_party_id",
-                kind: Kind::Text,
-                presence: Presence::Required,
-                meaning: "The id of the Party sent to, written as the User Message's To.",
-                applies: Applies::Send,
-            },
-            Setting {
-                name: "service",
-                kind: Kind::Text,
-                presence: Presence::Default(Fixed::Text(TEST_SERVICE)),
-                meaning: "The ebMS service a User Message is sent under; the ebMS test \
-                          service when left out.",
-                applies: Applies::Send,
-            },
-            Setting {
-                name: "action",
-                kind: Kind::Text,
-                presence: Presence::Default(Fixed::Text(TEST_ACTION)),
-                meaning: "The ebMS action a User Message is sent under; the ebMS test \
-                          action when left out.",
-                applies: Applies::Send,
-            },
-            transport::configured::timeout(
-                Applies::Both,
-                None,
-                "How long a Party that stops mid-message is waited on; unbounded \
-                 when left out.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["as4", "as4s"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     /// The whole address: its scheme says whether TLS guards the endpoint.
     fn own_terms(address: &str) -> &str {
@@ -110,7 +63,8 @@ impl Configured for As4Transport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xcore::settings::Given;
+    use crate::declaration::TEST_SERVICE;
+    use xcore::settings::{Applies, Given};
 
     #[test]
     fn as4_declares_its_settings_and_reads_through_them() {

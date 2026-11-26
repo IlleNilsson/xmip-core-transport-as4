@@ -22,6 +22,10 @@ A Party waits on its connection for its Receipt until the runtime's whole receiv
 
 A keyed send (the key `Transport::send_from` is handed, `Outgoing::key`; built 2026-10-04) carries the Journey's identifier as the User Message's `eb:MessageId`, `key@xmip` (`envelope::message_id_of`), and the conversation it opens, the same on every attempt on one Journey. A receiving MSH that has seen the id receipts it again and does not deliver it again — this crate's own receive does (`receipting::Receipting::seen`). An unkeyed `send` carries a random id, as before.
 
+## The declaration
+
+What a Location of this technology is configured with is two `const`s in its `declaration` module, `src/declaration.rs`, beside the code, which `Configured` reads (ADR-0064, amendment 2026-11-26): `declaration::SETTINGS`, `party_id`, `to_party_id`, `service`, `action` and `timeout`, and `SCHEMES`, `as4` and `as4s`; the ebMS test service and action, `service`'s and `action`'s defaults, are declared there too, `declaration::TEST_SERVICE` and `TEST_ACTION`, and the envelope a send writes takes them from there, where they were the envelope's until then. Built with its `declaration` feature alone (`--no-default-features --features declaration`), the crate is those and nothing more: its code and every crate the code is built on — the http technology, and with it TLS — are behind the default feature, and `tls`, which is code, turns the default on with it. So the library the surfaces load can carry it without the code, for the language server and the desktop to suggest and check an AS4 Location's settings though no node in their process loaded the technology, once the gathering crate of open problem 48 links it. `test/Declaration.Test.ps1` in the estate holds that the declaration builds nothing the transport capability does not.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
