@@ -30,9 +30,7 @@
 //! `as4://peer/msh?from=Buyer&message-id=1.2@xmip&action=Submit`.
 //!
 //! **Built with its `declaration` feature alone** the crate is
-//! [`declaration`], what a Location of it is configured with, and none of
-//! the code above, which is behind the default feature: what the surfaces'
-//! library carries (ADR-0064, amendment 2026-11-26).
+//! [`declaration`].
 
 #[cfg(feature = "declaration")]
 pub mod declaration;
@@ -320,9 +318,7 @@ impl Transport for As4Transport {
     }
 
     fn arrivals(&self) -> transport::Arrivals {
-        transport::Arrivals::Unordered(
-            "each request is its own, and a connection waiting for its answer takes no next request",
-        )
+        transport::answer::ONE_AT_A_TIME
     }
 
     fn waiting(&self) -> transport::Waiting {
