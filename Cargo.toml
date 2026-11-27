@@ -1,11 +1,11 @@
 [package]
 name = "xmip-core-transport-as4"
-version = "0.1.0"
-edition = "2024"
-license = "AGPL-3.0-or-later"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 repository = "https://github.com/IlleNilsson/xmip-core-transport-as4"
 description = "AS4 transport: the OASIS ebMS 3.0 AS4 profile over HTTP — one User Message is one Stream, its parties and collaboration beside it, answered with a Receipt signal; a Receive Location answers Parties, a Send Location posts to one. A xmip-core-transport technology."
-publish = false
+publish.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -32,16 +32,8 @@ http = { package = "xmip-core-transport-http", git = "https://github.com/IlleNil
 # (`net::Endpoint`): the one codec every technology riding on HTTP calls.
 net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main", optional = true }
 
-[lints.rust]
-unsafe_code = "forbid"
-
-[lints.clippy]
-too_many_lines = "warn"
-pedantic = { level = "warn", priority = -1 }
-missing_errors_doc = "warn"
-missing_panics_doc = "warn"
-unwrap_used = "warn"
-expect_used = "allow"
+[lints]
+workspace = true
 
 [features]
 # The code and its declaration: the transport guide's "The declaration",

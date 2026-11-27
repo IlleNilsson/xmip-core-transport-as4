@@ -26,11 +26,6 @@ A keyed send (the key `Transport::send_from` is handed, `Outgoing::key`; built 2
 
 What a Location of this technology is configured with is two `const`s in its `declaration` module, `src/declaration.rs`, beside the code, which `Configured` reads (ADR-0064, amendment 2026-11-26): `declaration::SETTINGS`, `party_id`, `to_party_id`, `service`, `action` and `timeout`, and `SCHEMES`, `as4` and `as4s`; the ebMS test service and action, `service`'s and `action`'s defaults, are declared there too, `declaration::TEST_SERVICE` and `TEST_ACTION`, and the envelope a send writes takes them from there, where they were the envelope's until then. Built with its `declaration` feature alone (`--no-default-features --features declaration`), the crate is those and nothing more: its code and every crate the code is built on — the http technology, and with it TLS — are behind the default feature, and `tls`, which is code, turns the default on with it. So the library the surfaces load carries it without the code, through the gathering crate xmip-core-declaration (open problem 48), and the language server and the desktop suggest and check an AS4 Location's settings though no node in their process loaded the technology. `test/Declaration.Test.ps1` in the estate holds that the declaration builds nothing the transport capability does not.
 
-## Toolchain
-
-`rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
-here.
-
 ## Verification
 
 The included workflow is manual-only and calls the versioned shared workflow at
